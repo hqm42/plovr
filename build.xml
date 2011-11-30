@@ -164,7 +164,7 @@
           depends="compile, externs, library, third_party"
           description="build plovr.jar">
     <mkdir dir="${build.dir}" />
-    
+
     <!-- Copy resources needed for org.plovr package. -->
     <copy todir="${classes.dir}/org/plovr">
       <fileset dir="${src.dir}/org/plovr">
@@ -219,6 +219,34 @@
                        />
 
       <fileset dir="${classes.dir}" />
+      <manifest>
+        <attribute name="Main-Class" value="org.plovr.cli.Main" />
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="jar-excluding-deps"
+          depends="jar"
+          description="Creates a non-standalone jar of all Java class files, excluding dependencies.">
+    <jar destfile="${build.dir}/plovr-excluding-deps.jar" update="true">
+      <fileset dir="${classes.dir}" />
+      <zipfileset dir="${closure-compiler.dir}/externs/"
+                  includes="**/*.js"
+                  prefix="externs"
+                  />
+      <zipfileset dir="${closure-library.dir}/closure/goog/"
+                  includes="**/*.js"
+                  excludes="deps.js"
+                  prefix="closure/goog"
+                  />
+      <zipfileset dir="${closure-library.dir}/third_party/closure/goog/"
+                  includes="**/*.js"
+                  excludes="deps.js"
+                  prefix="third_party/closure/goog"
+                  />
+      <zipfileset dir="${closure-templates.dir}/javascript/"
+                  includes="soyutils_usegoog.js, soyutils.js"
+                  prefix="soy" />
       <manifest>
         <attribute name="Main-Class" value="org.plovr.cli.Main" />
       </manifest>
@@ -294,7 +322,7 @@
       <link href="http://closure-templates.googlecode.com/svn/trunk/javadoc-complete/" />
     </javadoc>
   </target>
-  
+
   <!--
   This runs plovr such that classfiles from build/classes are loaded before
   those in plovr.jar. This way, when developing the documentation generation
