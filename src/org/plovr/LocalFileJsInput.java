@@ -25,7 +25,7 @@ public abstract class LocalFileJsInput extends AbstractJsInput {
 
   private long lastModified;
 
-  private static Map<Pair<File,String>, JsInput> jsInputCache = Maps.newHashMap();
+  private static Map<Pair<File,String>, JsInput> jsInputCache = Maps.newConcurrentMap();
 
   LocalFileJsInput(String name, File source) {
     super(name);
