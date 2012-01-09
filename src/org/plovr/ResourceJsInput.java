@@ -31,6 +31,15 @@ public class ResourceJsInput extends AbstractJsInput {
     try {
       InputStream input = ResourceReader.class.getResourceAsStream(
           pathToResource);
+      
+      // getResourceAsStream returns null if it can't find the resource,
+      // handle this like an IO Error
+      if (input == null) {
+          String msg = "File specified in config could not be found: " + pathToResource;
+          logger.severe(msg);
+          throw new RuntimeException(msg);
+      }
+      
       Readable readable = new InputStreamReader(input, Settings.CHARSET);
       LineReader lineReader = new LineReader(readable);
       StringBuilder builder = new StringBuilder();
