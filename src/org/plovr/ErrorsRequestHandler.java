@@ -9,17 +9,13 @@ import java.util.logging.Logger;
 import org.plovr.io.Responses;
 
 import com.google.common.base.Charsets;
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.Resources;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.javascript.jscomp.Result;
 import com.google.template.soy.SoyFileSet;
 import com.google.template.soy.base.SoySyntaxException;
-import com.google.template.soy.data.SoyMapData;
-import com.google.template.soy.tofu.SoyTofu;
 import com.sun.net.httpserver.HttpExchange;
 
 /**
@@ -34,13 +30,9 @@ public class ErrorsRequestHandler extends AbstractGetHandler {
   private static final Logger logger = Logger.getLogger(
       ErrorsRequestHandler.class.getName());
 
-  private static final SoyTofu TOFU;
-
   static {
     SoyFileSet.Builder builder = new SoyFileSet.Builder();
     builder.add(Resources.getResource(InputFileHandler.class, "raw.soy"));
-    SoyFileSet fileSet = builder.build();
-    TOFU = fileSet.compileToJavaObj();
   }
 
   private final Gson gson;
