@@ -122,7 +122,6 @@ public class InputFileHandler extends AbstractGetHandler {
   @Override
   protected void doGet(HttpExchange exchange, QueryData data, Config config)
       throws IOException {
-    long start = System.currentTimeMillis();
     Manifest manifest = config.getManifest();
 
     // Find the code for the requested input.
@@ -168,14 +167,7 @@ public class InputFileHandler extends AbstractGetHandler {
       return;
     }
 
-    long end = System.currentTimeMillis();
-
     Responses.writeJs(code, config, exchange);
-    long written = System.currentTimeMillis();
-
-    // Currently included for help with debugging
-    // http://code.google.com/p/plovr/issues/detail?id=54
-    System.out.printf("Millis to load code: %d  to write: %d  name: %s\n", (end - start), (written - end), name);
   }
 
   private String getCodeForDepsJs(Manifest manifest) {
