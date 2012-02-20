@@ -39,10 +39,10 @@ import com.google.gson.JsonPrimitive;
 import com.google.javascript.jscomp.CheckLevel;
 import com.google.javascript.jscomp.ClosureCodingConvention;
 import com.google.javascript.jscomp.CompilationLevel;
-import com.google.javascript.jscomp.CompilerOptions;
 import com.google.javascript.jscomp.CompilerPass;
 import com.google.javascript.jscomp.CustomPassExecutionTime;
 import com.google.javascript.jscomp.DiagnosticGroup;
+import com.google.javascript.jscomp.PlovrCompilerOptions;
 import com.google.javascript.jscomp.VariableMap;
 import com.google.javascript.jscomp.WarningLevel;
 import com.google.template.soy.xliffmsgplugin.XliffMsgPluginModule;
@@ -139,13 +139,18 @@ public final class Config implements Comparable<Config> {
 
   private final File propertyMapOutputFile;
 
-  /**
-   * Time this configuration was loaded
-   */
-  private final long timestamp;
+  private List<FileWithLastModified> configFileInheritanceChain =
+      Lists.newArrayList();
 
-  @Nullable
-  private final File configFile;
+  private final List<File> cssInputs;
+
+  private final List<String> allowedUnrecognizedProperties;
+
+  private final List<String> allowedNonStandardCssFunctions;
+
+  private final String gssFunctionMapProviderClassName;
+
+  private final File cssOutputFile;
 
   /**
    * @param id Unique identifier for the configuration. This is used as an
@@ -182,13 +187,17 @@ public final class Config implements Comparable<Config> {
       boolean ambiguateProperties,
       boolean disambiguateProperties,
       JsonObject experimentalCompilerOptions,
-      File configFile,
-      long timestamp,
+      List<FileWithLastModified> configFileInheritanceChain,
       String globalScopeName,
       File variableMapInputFile,
       File variableMapOutputFile,
       File propertyMapInputFile,
-      File propertyMapOutputFile) {
+      File propertyMapOutputFile,
+      List<File> cssInputs,
+      List<String> allowedUnrecognizedProperties,
+      List<String> allowedNonStandardCssFunctions,
+      String gssFunctionMapProviderClassName,
+      File cssOutputFile) {
     Preconditions.checkNotNull(defines);
 
     this.id = id;
@@ -219,13 +228,19 @@ public final class Config implements Comparable<Config> {
     this.ambiguateProperties = ambiguateProperties;
     this.disambiguateProperties = disambiguateProperties;
     this.experimentalCompilerOptions = experimentalCompilerOptions;
-    this.configFile = configFile;
-    this.timestamp = timestamp;
+    this.configFileInheritanceChain = ImmutableList.copyOf(configFileInheritanceChain);
     this.globalScopeName = globalScopeName;
     this.variableMapInputFile = variableMapInputFile;
     this.variableMapOutputFile = variableMapOutputFile;
     this.propertyMapInputFile = propertyMapInputFile;
     this.propertyMapOutputFile = propertyMapOutputFile;
+    this.cssInputs = ImmutableList.copyOf(cssInputs);
+    this.allowedUnrecognizedProperties = ImmutableList.copyOf(
+        allowedUnrecognizedProperties);
+    this.allowedNonStandardCssFunctions = ImmutableList.copyOf(
+        allowedNonStandardCssFunctions);
+    this.gssFunctionMapProviderClassName = gssFunctionMapProviderClassName;
+    this.cssOutputFile = cssOutputFile;
   }
 
   public static Builder builder(File relativePathBase, File configFile,
@@ -244,7 +259,7 @@ public final class Config implements Comparable<Config> {
   @VisibleForTesting
   public static Builder builderForTesting() {
     File rootDirectory = File.listRoots()[0];
-    return new Builder(rootDirectory, null, "");
+    return new Builder(rootDirectory, "");
   }
 
   public String getId() {
@@ -325,13 +340,26 @@ public final class Config implements Comparable<Config> {
     return documentationOutputDirectory;
   }
 
+  /**
+   * Gets the file that was loaded by plovr to create this config. Note that
+   * there may be other files that were loaded as part of the config
+   * inheritance change in order to create this config.
+   */
   public File getConfigFile() {
-    return configFile;
+    int lastIndex = configFileInheritanceChain.size() - 1;
+    return configFileInheritanceChain.get(lastIndex).file;
   }
 
+  /**
+   * @return true if the last modified time for the underlying config file
+   *     (or any of the config files that it inherited) has changed since this
+   *     config was originally created
+   */
   public boolean isOutOfDate() {
-    if (configFile != null) {
-      return timestamp < configFile.lastModified();
+    for (FileWithLastModified file : configFileInheritanceChain) {
+      if (file.isOutOfDate()) {
+        return true;
+      }
     }
     return false;
   }
@@ -389,6 +417,26 @@ public final class Config implements Comparable<Config> {
     return testExcludePaths;
   }
 
+  public List<File> getCssInputs() {
+    return cssInputs;
+  }
+
+  public List<String> getAllowedUnrecognizedProperties() {
+    return allowedUnrecognizedProperties;
+  }
+
+  public List<String> getAllowedNonStandardCssFunctions() {
+    return allowedNonStandardCssFunctions;
+  }
+
+  public String getGssFunctionMapProviderClassName() {
+    return gssFunctionMapProviderClassName;
+  }
+
+  public File getCssOutputFile() {
+    return cssOutputFile;
+  }
+
   /**
    * @param path a relative path, such as "foo/bar_test.js" or
    *     "foo/bar_test.html".
@@ -410,12 +458,13 @@ public final class Config implements Comparable<Config> {
     return null;
   }
 
-  public CompilerOptions getCompilerOptions(PlovrClosureCompiler compiler) {
+  public PlovrCompilerOptions getCompilerOptions(
+      PlovrClosureCompiler compiler) {
     Preconditions.checkArgument(compilationMode != CompilationMode.RAW,
         "Cannot compile using RAW mode");
     CompilationLevel level = compilationMode.getCompilationLevel();
     logger.info("Compiling with level: " + level);
-    CompilerOptions options = new CompilerOptions();
+    PlovrCompilerOptions options = new PlovrCompilerOptions();
     level.setOptionsForCompilationLevel(options);
     if (debug) {
       level.setDebugOptionsForCompilationLevel(options);
@@ -528,7 +577,7 @@ public final class Config implements Comparable<Config> {
     // This is a hack to work around the fact that a SourceMap
     // will not be created unless a file is specified to which the SourceMap
     // should be written.
-    // TODO(bolinfest): Change com.google.javascript.jscomp.CompilerOptions so
+    // TODO(bolinfest): Change com.google.javascript.jscomp.PlovrCompilerOptions so
     // that this is configured by a boolean, just like enableExternExports() was
     // added to support generating externs without writing them to a file.
     try {
@@ -538,7 +587,7 @@ public final class Config implements Comparable<Config> {
       logger.severe("A temp file for the Source Map could not be created");
     }
 
-    options.enableExternExports(true);
+    options.setExternExports(true);
 
     // After all of the options are set, apply the experimental Compiler
     // options, which may override existing options that are set.
@@ -548,10 +597,10 @@ public final class Config implements Comparable<Config> {
   }
 
   /**
-   * Lazily creates and returns the customPasses ListMultimap for a CompilerOptions.
+   * Lazily creates and returns the customPasses ListMultimap for a PlovrCompilerOptions.
    */
   private static Multimap<CustomPassExecutionTime, CompilerPass> getCustomPasses(
-      CompilerOptions options) {
+      PlovrCompilerOptions options) {
     Multimap<CustomPassExecutionTime, CompilerPass> customPasses =
         options.customPasses;
     if (customPasses == null) {
@@ -564,7 +613,7 @@ public final class Config implements Comparable<Config> {
   @VisibleForTesting
   static void applyExperimentalCompilerOptions(
       JsonObject experimentalCompilerOptions,
-      CompilerOptions options) {
+      PlovrCompilerOptions options) {
     // This method needs to be refactored, but all of the checked exceptions
     // make refactoring it difficult.
     if (experimentalCompilerOptions == null) {
@@ -586,10 +635,14 @@ public final class Config implements Comparable<Config> {
       Field field;
       try {
         try {
-          field = CompilerOptions.class.getField(name);
+          field = PlovrCompilerOptions.class.getField(name);
         } catch (NoSuchFieldException e) {
           field = null;
         }
+
+        // TODO: If the field is private, use field.setAccessible(true), though
+        // only if there is no public setter method (which may have other side-
+        // effects, which is why it should be preferred).
 
         if (field != null) {
           Class<?> fieldClass = field.getType();
@@ -621,7 +674,7 @@ public final class Config implements Comparable<Config> {
         // method to set the option instead.
         String setterName = "set" + createSetterMethodNameForFieldName(name);
         if (primitive.isBoolean()) {
-          Method setter = CompilerOptions.class.getMethod(setterName, boolean.class);
+          Method setter = PlovrCompilerOptions.class.getMethod(setterName, boolean.class);
           setter.invoke(options, primitive.getAsBoolean());
           continue;
         } else if (primitive.isNumber()) {
@@ -629,7 +682,7 @@ public final class Config implements Comparable<Config> {
           // it works with an int or a double.
         } else if (primitive.isString()) {
           try {
-            Method setter = CompilerOptions.class.getMethod(setterName, String.class);
+            Method setter = PlovrCompilerOptions.class.getMethod(setterName, String.class);
             setter.invoke(options, primitive.getAsString());
             continue;
           } catch (NoSuchMethodException e) {
@@ -661,10 +714,10 @@ public final class Config implements Comparable<Config> {
    * @return true if this was successful
    */
   private static boolean setCompilerOptionToEnumValue(
-      CompilerOptions options,
+      PlovrCompilerOptions options,
       String setterMethodName,
       String value) {
-    for (Method m : CompilerOptions.class.getMethods()) {
+    for (Method m : PlovrCompilerOptions.class.getMethods()) {
       if (setterMethodName.equals(m.getName())) {
         Class<?> paramClass = m.getParameterTypes()[0];
         if (paramClass.isEnum()) {
@@ -719,10 +772,12 @@ public final class Config implements Comparable<Config> {
 
     private final File relativePathBase;
 
-    @Nullable
-    private File configFile;
-
-    private long lastModified;
+    /**
+     * This is the inheritance chain of config files that produced this config.
+     * Descendants are added to the end of the list.
+     */
+    private List<FileWithLastModified> configFileInheritanceChain =
+        Lists.newArrayList();
 
     private final String rootConfigFileContent;
 
@@ -805,6 +860,18 @@ public final class Config implements Comparable<Config> {
 
     private final Map<String, JsonPrimitive> defines;
 
+    /************************* CSS OPTIONS *************************/
+
+    private List<File> cssInputs = Lists.newArrayList();
+
+    private List<String> allowedUnrecognizedProperties = Lists.newArrayList();
+
+    private List<String> allowedNonStandardFunctions = Lists.newArrayList();
+
+    private String gssFunctionMapProviderClassName;
+
+    private File cssOutputFile = null;
+
     /**
      * Pattern to validate a config id. A config id may not contain funny
      * characters, such as slashes, because ids are used in RESTful URLs, so
@@ -814,6 +881,11 @@ public final class Config implements Comparable<Config> {
         AbstractGetHandler.CONFIG_ID_PATTERN);
 
     private Builder(File relativePathBase, File configFile, String rootConfigFileContent) {
+      this(relativePathBase, rootConfigFileContent);
+      addConfigFile(configFile);
+    }
+
+    private Builder(File relativePathBase, String rootConfigFileContent) {
       Preconditions.checkNotNull(relativePathBase);
       Preconditions.checkArgument(relativePathBase.isDirectory(),
           relativePathBase + " is not a directory");
@@ -823,14 +895,14 @@ public final class Config implements Comparable<Config> {
       testExcludePaths = Lists.newArrayList();
       manifest = null;
       defines = Maps.newHashMap();
-      setConfigFile(configFile);
     }
 
     /** Effectively a copy constructor. */
     private Builder(Config config) {
       Preconditions.checkNotNull(config);
       this.relativePathBase = null;
-      this.configFile = null;
+      this.configFileInheritanceChain = Lists.newArrayList(
+          config.configFileInheritanceChain);
       this.rootConfigFileContent = config.rootConfigFileContent;
       this.id = config.id;
       this.manifest = config.manifest;
@@ -868,6 +940,14 @@ public final class Config implements Comparable<Config> {
       this.propertyMapInputFile = config.propertyMapInputFile;
       this.propertyMapOutputFile = config.propertyMapOutputFile;
       this.defines = Maps.newHashMap(config.defines);
+      this.cssInputs = Lists.newArrayList(config.cssInputs);
+      this.allowedUnrecognizedProperties = Lists.newArrayList(
+          config.allowedUnrecognizedProperties);
+      this.allowedNonStandardFunctions = Lists.newArrayList(
+          config.allowedNonStandardCssFunctions);
+      this.gssFunctionMapProviderClassName = config.
+          gssFunctionMapProviderClassName;
+      this.cssOutputFile = config.cssOutputFile;
     }
 
     /** Directory against which relative paths should be resolved. */
@@ -943,9 +1023,13 @@ public final class Config implements Comparable<Config> {
       this.excludeClosureLibrary = excludeClosureLibrary;
     }
 
-    public void setConfigFile(File configFile) {
-      this.configFile = configFile;
-      this.lastModified = configFile != null ? configFile.lastModified() : 0;
+    /**
+     * Appends the specified file to the end of the config file inheritance
+     * chain for this builder.
+     */
+    void addConfigFile(File configFile) {
+      Preconditions.checkNotNull(configFile);
+      configFileInheritanceChain.add(new FileWithLastModified(configFile));
     }
 
     public ModuleConfig.Builder getModuleConfigBuilder() {
@@ -1077,7 +1161,7 @@ public final class Config implements Comparable<Config> {
      * however, a key cannot map to a {@link DiagnosticGroup} yet because
      * custom compiler passes may add their own entries to the
      * {@link PlovrDiagnosticGroups} collection, which is not populated until
-     * the {@link CompilerOptions} are created.
+     * the {@link PlovrCompilerOptions} are created.
      * @param groups
      */
     public void setCheckLevelsForDiagnosticGroups(Map<String, CheckLevel> groups) {
@@ -1169,6 +1253,44 @@ public final class Config implements Comparable<Config> {
       this.propertyMapOutputFile = file;
     }
 
+    public void addCssInput(File cssInput) {
+      Preconditions.checkNotNull(cssInput);
+      Preconditions.checkArgument(cssInput.exists(),
+          "CSS input %s must exist", cssInput.getAbsolutePath());
+      Preconditions.checkArgument(cssInput.isFile(),
+          "CSS input %s must be a file", cssInput.getAbsolutePath());
+      cssInputs.add(cssInput);
+    }
+
+    public void resetCssInputs() {
+      cssInputs.clear();
+    }
+
+    public void addAllowedNonStandardCssFunction(String function) {
+      allowedNonStandardFunctions.add(function);
+    }
+
+    public void resetAllowedNonStandardCssFunctions() {
+      allowedNonStandardFunctions.clear();
+    }
+
+    public void addAllowedUnrecognizedProperty(String property) {
+      allowedUnrecognizedProperties.add(property);
+    }
+
+    public void resetAllowedUnrecognizedProperties() {
+      allowedUnrecognizedProperties.clear();
+    }
+
+    public void setGssFunctionMapProvider(
+        String gssFunctionMapProviderClassName) {
+      this.gssFunctionMapProviderClassName = gssFunctionMapProviderClassName;
+    }
+
+    public void setCssOutputFile(File cssOutputFile) {
+      this.cssOutputFile = cssOutputFile;
+    }
+
     public Config build() {
       File closureLibraryDirectory = pathToClosureLibrary != null
           ? new File(pathToClosureLibrary)
@@ -1240,13 +1362,17 @@ public final class Config implements Comparable<Config> {
           ambiguateProperties,
           disambiguateProperties,
           experimentalCompilerOptions,
-          configFile,
-          lastModified,
+          configFileInheritanceChain,
           globalScopeName,
           variableMapInputFile,
           variableMapOutputFile,
           propertyMapInputFile,
-          propertyMapOutputFile);
+          propertyMapOutputFile,
+          cssInputs,
+          allowedUnrecognizedProperties,
+          allowedNonStandardFunctions,
+          gssFunctionMapProviderClassName,
+          cssOutputFile);
 
       return config;
     }
@@ -1288,5 +1414,19 @@ public final class Config implements Comparable<Config> {
   @Override
   public int compareTo(Config otherConfig) {
     return getId().compareTo(otherConfig.getId());
+  }
+
+  private static class FileWithLastModified {
+    public final File file;
+    public final long lastModified;
+    private FileWithLastModified(File file) {
+      Preconditions.checkNotNull(file);
+      this.file = file;
+      this.lastModified = file.lastModified();
+    }
+    public boolean isOutOfDate() {
+      // true if the last modified time has changed
+      return this.lastModified != file.lastModified();
+    }
   }
 }

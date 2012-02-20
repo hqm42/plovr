@@ -50,6 +50,11 @@ public final class Responses {
     writeText(html, "text/html", exchange);
   }
 
+  public static void writeCss(String css, HttpExchange exchange)
+  throws IOException {
+    writeText(css, "text/css", exchange);
+  }
+
   private static void writeText(String text, String contentType,
       HttpExchange exchange) throws IOException {
     // Write the Content-Type and Content-Length headers.
@@ -66,6 +71,10 @@ public final class Responses {
   public static void redirect(HttpExchange exchange, String uri)
       throws IOException {
     exchange.getResponseHeaders().add("Location", uri);
-    exchange.sendResponseHeaders(302, 0);
+    exchange.sendResponseHeaders(302, -1);
+  }
+
+  public static void notModified(HttpExchange exchange) throws IOException {
+    exchange.sendResponseHeaders(304, -1);
   }
 }

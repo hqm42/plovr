@@ -4,10 +4,10 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URL;
 
-import com.google.javascript.jscomp.mozilla.rhino.Context;
-import com.google.javascript.jscomp.mozilla.rhino.JavaScriptException;
-import com.google.javascript.jscomp.mozilla.rhino.NativeObject;
-import com.google.javascript.jscomp.mozilla.rhino.Scriptable;
+import com.google.javascript.rhino.head.Context;
+import com.google.javascript.rhino.head.JavaScriptException;
+import com.google.javascript.rhino.head.NativeObject;
+import com.google.javascript.rhino.head.Scriptable;
 
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
@@ -114,7 +114,7 @@ public class CoffeeScriptCompiler {
           return (String)result;
         } else if (result instanceof NativeObject) {
           NativeObject obj = (NativeObject)result;
-          String message = (String)NativeObject.getProperty(obj, "message");
+          String message = NativeObject.getProperty(obj, "message").toString();
           throw new CoffeeScriptCompilerException(message);
         } else {
           throw new RuntimeException("Unexpected return type: " +

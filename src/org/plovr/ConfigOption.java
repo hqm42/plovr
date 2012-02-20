@@ -616,6 +616,97 @@ public enum ConfigOption {
       return true;
     }
   }),
+
+  /************************* CSS OPTIONS *************************/
+
+  CSS_INPUTS("css-inputs", new ConfigUpdater() {
+    @Override
+    public void apply(String input, Config.Builder builder) {
+      String resolvedPath = maybeResolvePath(input, builder);
+      builder.addCssInput(new File(resolvedPath));
+    }
+
+    @Override
+    public void apply(JsonArray inputs, Config.Builder builder) {
+      for (JsonElement item : inputs) {
+        String path = GsonUtil.stringOrNull(item);
+        if (path != null) {
+          apply(path, builder);
+        }
+      }
+    }
+
+    @Override
+    public boolean reset(Config.Builder builder) {
+      builder.resetCssInputs();
+      return true;
+    }
+  }),
+
+  CSS_ALLOWED_UNRECOGNIZED_PROPERTIES("css-allowed-unrecognized-properties",
+      new ConfigUpdater() {
+    @Override
+    public void apply(String property, Config.Builder builder) {
+      builder.addAllowedUnrecognizedProperty(property);
+    }
+
+    @Override
+    public void apply(JsonArray properties, Config.Builder builder) {
+      for (JsonElement item : properties) {
+        String property = GsonUtil.stringOrNull(item);
+        if (property != null) {
+          apply(property, builder);
+        }
+      }
+    }
+
+    @Override
+    public boolean reset(Config.Builder builder) {
+      builder.resetAllowedUnrecognizedProperties();
+      return true;
+    }
+  }),
+
+  CSS_ALLOWED_NON_STANDARD_FUNCTIONS("css-allowed-non-standard-functions",
+      new ConfigUpdater() {
+    @Override
+    public void apply(String function, Config.Builder builder) {
+      builder.addAllowedNonStandardCssFunction(function);
+    }
+
+    @Override
+    public void apply(JsonArray functions, Config.Builder builder) {
+      for (JsonElement item : functions) {
+        String function = GsonUtil.stringOrNull(item);
+        if (function != null) {
+          apply(function, builder);
+        }
+      }
+    }
+
+    @Override
+    public boolean reset(Config.Builder builder) {
+      builder.resetAllowedNonStandardCssFunctions();
+      return true;
+    }
+  }),
+
+  CSS_GSS_FUNCTION_MAP_PROVIDER("css-gss-function-map-provider",
+      new ConfigUpdater() {
+    @Override
+    public void apply(String functionMapProviderClass, Config.Builder builder) {
+      builder.setGssFunctionMapProvider(functionMapProviderClass);
+    }
+  }),
+
+  CSS_OUTPUT_FILE("css-output-file", new ConfigUpdater() {
+    @Override
+    public void apply(String outputFilePath, Config.Builder builder) {
+      File outputFile = (outputFilePath == null) ? null :
+          new File(maybeResolvePath(outputFilePath, builder));
+      builder.setCssOutputFile(outputFile);
+    }
+  }),
   ;
 
   private static class ConfigUpdater {
