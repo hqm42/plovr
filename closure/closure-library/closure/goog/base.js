@@ -40,13 +40,9 @@ var goog = goog || {}; // Identifies this file as the Closure base.
 
 
 /**
- * @define {boolean}
+ * Reference to the global context.  In most cases this will be 'window'.
  */
-goog.NODE_JS = false;
-
-
-// eval() is used so that "global" does not need to be an extern.
-goog.global = goog.NODE_JS ? eval('global') : this;
+goog.global = this;
 
 
 /**
@@ -157,38 +153,6 @@ if (!COMPILED) {
 
 
 /**
- * Used in the context of Node JS to determine whether the argument is an
- * existing variable in the global namespace, or if it should be added as a
- * property of goog.global in order to create it.
- *
- * @param {string} goog The namespace to test. This is deliberately named "goog"
- *     rather than "nameSpace" or something more appropriate because the goal is
- *     to avoid introducing any new variables into the scope of the function
- *     that would alter the behavior of eval().
- *
- *     Because it is known that "goog" is an existing global variable, shadowing
- *     it with a local variable here does not introduce a new variable in the
- *     scope of this function. Further, it is known that when the local variable
- *     goog is the value 'goog', this function should always return true, which
- *     it does.
- *
- *     Ideally, this function would not declare any arguments and would simply
- *     reference arguments[0], but that yields a WRONG_ARGUMENT_COUNT warning
- *     at the call sites of goog.isExistingGlobalVariable_() from the Closure
- *     Compiler when type-checking is enabled. 
- * @return {boolean}
- * @private
- */
-goog.isExistingGlobalVariable_ = function(goog) {
-  // Note that if the variable is declared globally with "var" but is undefined,
-  // then this function will return a false negative.
-  // Similarly, if goog is 'arguments', 'parseInt', or any other member that is
-  // in scope, it will return a false positive.
-  return String(eval('typeof ' + goog)) !== 'undefined';
-};
-
-
-/**
  * Builds an object structure for the provided namespace path,
  * ensuring that names that already exist are not overwritten. For
  * example:
@@ -209,17 +173,6 @@ goog.exportPath_ = function(name, opt_object, opt_objectToExportTo) {
   // base_test.html for an example.
   if (!(parts[0] in cur) && cur.execScript) {
     cur.execScript('var ' + parts[0]);
-  }
-
-  if (goog.NODE_JS && cur === goog.global) {
-    // If parts[0] is already a variable global scope such as "goog", then do
-    // not access it from goog.global because then there will be a global
-    // variable "goog" as well as a "global.goog", and they will be different
-    // objects, causing all sorts of problems.
-    if (goog.isExistingGlobalVariable_(parts[0])) {
-      cur = eval(parts[0]);
-      parts.shift();
-    }
   }
 
   // Certain browsers cannot parse code in the form for((a in b); c;);
@@ -254,18 +207,6 @@ goog.exportPath_ = function(name, opt_object, opt_objectToExportTo) {
 goog.getObjectByName = function(name, opt_obj) {
   var parts = name.split('.');
   var cur = opt_obj || goog.global;
-
-  if (goog.NODE_JS && cur === goog.global) {
-    // If parts[0] is already a variable global scope such as "goog", then do
-    // not access it from goog.global because then there will be a global
-    // variable "goog" as well as a "global.goog", and they will be different
-    // objects, causing all sorts of problems.
-    if (goog.isExistingGlobalVariable_(parts[0])) {
-      cur = eval(parts[0]);
-      parts.shift();
-    }
-  }
-
   for (var part; part = parts.shift(); ) {
     if (goog.isDefAndNotNull(cur[part])) {
       cur = cur[part];
@@ -443,12 +384,14 @@ goog.nullFunction = function() {};
 /**
  * The identity function. Returns its first argument.
  *
- * @param {...*} var_args The arguments of the function.
- * @return {*} The first argument.
+ * @param {*=} opt_returnValue The single value that will be returned.
+ * @param {...*} var_args Optional trailing arguments. These are ignored.
+ * @return {?} The first argument. We can't know the type -- just pass it along
+ *      without type.
  * @deprecated Use goog.functions.identity instead.
  */
-goog.identityFunction = function(var_args) {
-  return arguments[0];
+goog.identityFunction = function(opt_returnValue, var_args) {
+  return opt_returnValue;
 };
 
 
@@ -481,9 +424,26 @@ goog.abstractMethod = function() {
  */
 goog.addSingletonGetter = function(ctor) {
   ctor.getInstance = function() {
-    return ctor.instance_ || (ctor.instance_ = new ctor());
+    if (ctor.instance_) {
+      return ctor.instance_;
+    }
+    if (goog.DEBUG) {
+      // NOTE: JSCompiler can't optimize away Array#push.
+      goog.instantiatedSingletons_[goog.instantiatedSingletons_.length] = ctor;
+    }
+    return ctor.instance_ = new ctor;
   };
 };
+
+
+/**
+ * All singleton classes that have been instantiated, for testing. Don't read
+ * it directly, use the {@code goog.testing.singleton} module. The compiler
+ * removes this variable if unused.
+ * @type {!Array.<!Function>}
+ * @private
+ */
+goog.instantiatedSingletons_ = [];
 
 
 if (!COMPILED && goog.ENABLE_DEBUG_LOADER) {
@@ -1017,19 +977,6 @@ goog.cloneObject = function(obj) {
 
 
 /**
- * Forward declaration for the clone method. This is necessary until the
- * compiler can better support duck-typing constructs as used in
- * goog.cloneObject.
- *
- * TODO(brenneman): Remove once the JSCompiler can infer that the check for
- * proto.clone is safe in goog.cloneObject.
- *
- * @type {Function}
- */
-Object.prototype.clone;
-
-
-/**
  * A native implementation of goog.bind.
  * @param {Function} fn A function to partially apply.
  * @param {Object|undefined} selfObj Specifies the object which |this| should
@@ -1391,7 +1338,7 @@ goog.getMsg = function(str, opt_values) {
  * <p>Also handy for making public items that are defined in anonymous
  * closures.
  *
- * ex. goog.exportSymbol('Foo', Foo);
+ * ex. goog.exportSymbol('public.path.Foo', Foo);
  *
  * ex. goog.exportSymbol('public.path.Foo.staticFunction',
  *                       Foo.staticFunction);
@@ -1460,6 +1407,7 @@ goog.inherits = function(childCtor, parentCtor) {
   tempCtor.prototype = parentCtor.prototype;
   childCtor.superClass_ = parentCtor.prototype;
   childCtor.prototype = new tempCtor();
+  /** @override */
   childCtor.prototype.constructor = childCtor;
 };
 
