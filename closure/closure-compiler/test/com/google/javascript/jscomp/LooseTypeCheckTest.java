@@ -20,6 +20,8 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.CheckLevel;
 import com.google.javascript.jscomp.Scope.Var;
+import com.google.javascript.jscomp.type.ClosureReverseAbstractInterpreter;
+import com.google.javascript.jscomp.type.SemanticReverseAbstractInterpreter;
 import com.google.javascript.rhino.InputId;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
@@ -1252,7 +1254,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
 
   public void testScoping11() throws Exception {
     // named anonymous functions create a binding in their body only
-    // the return is wrong but the assignment is ok since the type of b is ?
+    // the return is wrong but the assignment is OK since the type of b is ?
     testTypes(
         "/** @return {number} */var a = function b(){ return b };",
         "inconsistent return type\n" +
@@ -1338,7 +1340,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
   }
 
   public void testFunctionArguments13() throws Exception {
-    // verifying that the argument type have non-inferrable types
+    // verifying that the argument type have non-inferable types
     testTypes(
         "/** @return {boolean} */ function u() { return true; }" +
         "/** @param {boolean} b\n@return {?boolean} */" +
@@ -1606,7 +1608,10 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         " var x = 0 || function() {};\n" +
         " function g() { if (goog.isFunction(x)) { x(1); } }" +
         " g();" +
-        "}", null);
+        "}",
+        "Function x: called with 1 argument(s). " +
+        "Function requires at least 0 argument(s) " +
+        "and no more than 0 argument(s).");
   }
 
   public void testInnerFunction7() throws Exception {
@@ -1784,11 +1789,11 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "F.prototype.foo = function() { };" +
         "/** @constructor \n * @extends {F} */ " +
         "function G() {}" +
-        "/** @override */ G.prototype.foo = function(x, y) { };" +
-        "(new G()).foo();",
-        "Function G.prototype.foo: called with 0 argument(s). " +
-        "Function requires at least 2 argument(s) " +
-        "and no more than 2 argument(s).");
+        "/** @override */ G.prototype.foo = function(x, y) { };",
+        "mismatch of the foo property type and the type of the property " +
+        "it overrides from superclass F\n" +
+        "original: function (this:F): undefined\n" +
+        "override: function (this:G, ?, ?): undefined");
   }
 
   public void testMethodInference8() throws Exception {
@@ -1798,10 +1803,8 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "/** @constructor \n * @extends {F} */ " +
         "function G() {}" +
         "/** @override */ " +
-        "G.prototype.foo = function(a, opt_b, var_args) { };" +
-        "(new G()).foo();",
-        "Function G.prototype.foo: called with 0 argument(s). " +
-        "Function requires at least 1 argument(s).");
+        "G.prototype.foo = function(opt_b, var_args) { };" +
+        "(new G()).foo(1, 2, 3);");
   }
 
   public void testMethodInference9() throws Exception {
@@ -1811,7 +1814,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "/** @constructor \n * @extends {F} */ " +
         "function G() {}" +
         "/** @override */ " +
-        "G.prototype.foo = function(a, var_args, opt_b) { };",
+        "G.prototype.foo = function(var_args, opt_b) { };",
         "variable length argument must be last");
   }
 
@@ -1910,23 +1913,31 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
   }
 
   public void testDuplicateStaticPropertyDecl4() throws Exception {
-    testTypes(
+    testClosureTypesMultipleWarnings(
         "var goog = goog || {};" +
         "/** @type {!Foo} */ goog.foo;" +
         "/** @type {string} */ goog.foo = 'x';" +
         "/** @constructor */ function Foo() {}",
-        "variable goog.foo redefined with type string, " +
-        "original definition at [testcode]:1 with type Foo");
+        Lists.newArrayList(
+            "assignment to property foo of goog\n" +
+            "found   : string\n" +
+            "required: Foo",
+            "variable goog.foo redefined with type string, " +
+            "original definition at [testcode]:1 with type Foo"));
   }
 
   public void testDuplicateStaticPropertyDecl5() throws Exception {
-    testTypes(
+    testClosureTypesMultipleWarnings(
         "var goog = goog || {};" +
         "/** @type {!Foo} */ goog.foo;" +
         "/** @type {string}\n * @suppress {duplicate} */ goog.foo = 'x';" +
         "/** @constructor */ function Foo() {}",
-        "variable goog.foo redefined with type string, " +
-        "original definition at [testcode]:1 with type Foo");
+        Lists.newArrayList(
+            "assignment to property foo of goog\n" +
+            "found   : string\n" +
+            "required: Foo",
+            "variable goog.foo redefined with type string, " +
+            "original definition at [testcode]:1 with type Foo"));
   }
 
   public void testDuplicateStaticPropertyDecl6() throws Exception {
@@ -1965,7 +1976,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "function f(x) { /** @type {string} */ var x = ''; }",
         Lists.newArrayList(
             "variable x redefined with type string, original definition" +
-            " at  [testcode] :2 with type number",
+            " at [testcode]:2 with type number",
             "initializing variable\n" +
             "found   : string\n" +
             "required: number"));
@@ -2178,7 +2189,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
     testTypes("/**@type number*/var a;" +
         "/**@type !Date */var b;" +
         "if (a!==b) {}",
-        "condition always evaluates to the same value\n" +
+        "condition always evaluates to true\n" +
         "left : number\n" +
         "right: Date");
   }
@@ -2696,7 +2707,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "/** @extends {base}\n * @constructor */function derived() {}\n" +
         "derived.inherits(base);",
         "(new derived).constructor",
-        "function (new:derived): undefined");
+        "function (new:derived, ...[?]): ?");
   }
 
   public void testGoodExtends8() throws Exception {
@@ -4428,7 +4439,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "var x = f();" +
         "/** @type {string} */" +
         "x.y = 3;",
-        "assignment to property y of x\n" +
+        "assignment\n" +
         "found   : number\n" +
         "required: string");
   }
@@ -5013,7 +5024,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
 
   public void testCast15() throws Exception {
     // This fixes a bug where a type cast on an object literal
-    // would cause a runtime cast exception if the node was visited
+    // would cause a run-time cast exception if the node was visited
     // more than once.
     //
     // Some code assumes that an object literal must have a object type,
@@ -5337,7 +5348,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
     // still the same type as the one on the variable
     assertTrue(googGetpropFoo2Type == googScopeType);
 
-    // goog.foo type on the left of the top level GETPROP node
+    // goog.foo type on the left of the top-level GETPROP node
     // (under second ASSIGN)
     JSType googFooGetprop2Type = getpropFoo2.getJSType();
     assertTrue("goog.foo incorrectly annotated in goog.foo.bar selection",
@@ -5587,9 +5598,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "/** @constructor */goog.Super = function() {};" +
         "goog.Super.prototype.foo = 3;" +
         "/** @constructor\n @extends {goog.Super} */goog.Sub = function() {};" +
-        "goog.Sub.prototype.foo = 5;",
-        "property foo already defined on superclass goog.Super; " +
-        "use @override to override it");
+        "goog.Sub.prototype.foo = 5;");
   }
 
   public void testInheritanceCheck8() throws Exception {
@@ -5689,11 +5698,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "/** @constructor */goog.Super = function() {};" +
         "goog.Super.prototype.foo = 3;" +
         "/** @constructor\n @extends {goog.Super} */goog.Sub = function() {};" +
-        "/** @override */goog.Sub.prototype.foo = \"some string\";",
-        "mismatch of the foo property type and the type of the property it " +
-        "overrides from superclass goog.Super\n" +
-        "original: number\n" +
-        "override: string");
+        "/** @override */goog.Sub.prototype.foo = \"some string\";");
   }
 
   public void testInheritanceCheck13() throws Exception {
@@ -5931,29 +5936,29 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
   //public void testWarningOnInterfacePrototype() throws Exception {
   //  testTypes("/** @interface */ u.T = function() {};\n" +
   //      "/** @return {number} */ u.T.prototype = function() { };",
-  //      "cannot reference an interface ouside of its definition");
+  //      "cannot reference an interface outside of its definition");
   //}
   //
   //public void testBadPropertyOnInterface1() throws Exception {
   //  testTypes("/** @interface */ u.T = function() {};\n" +
   //      "/** @return {number} */ u.T.f = function() { return 1;};",
-  //      "cannot reference an interface ouside of its definition");
+  //      "cannot reference an interface outside of its definition");
   //}
   //
   //public void testBadPropertyOnInterface2() throws Exception {
   //  testTypes("/** @interface */ function T() {};\n" +
   //      "/** @return {number} */ T.f = function() { return 1;};",
-  //      "cannot reference an interface ouside of its definition");
+  //      "cannot reference an interface outside of its definition");
   //}
   //
   //public void testBadPropertyOnInterface3() throws Exception {
   //  testTypes("/** @interface */ u.T = function() {}; u.T.x",
-  //      "cannot reference an interface ouside of its definition");
+  //      "cannot reference an interface outside of its definition");
   //}
   //
   //public void testBadPropertyOnInterface4() throws Exception {
   //  testTypes("/** @interface */ function T() {}; T.x;",
-  //      "cannot reference an interface ouside of its definition");
+  //      "cannot reference an interface outside of its definition");
   //}
 
   public void testAnnotatedPropertyOnInterface1() throws Exception {
@@ -6075,11 +6080,15 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
   }
 
   public void testErrorMismatchingPropertyOnInterface6() throws Exception {
-    testTypes("/** @interface */ function T() {};\n" +
+    testClosureTypesMultipleWarnings(
+        "/** @interface */ function T() {};\n" +
         "/** @return {number} */T.prototype.x = 1",
-        "interface members can only be empty property declarations, "
-        + "empty functions, or goog.abstractMethod"
-        );
+        Lists.newArrayList(
+            "assignment to property x of T.prototype\n" +
+            "found   : number\n" +
+            "required: function (this:T): number",
+            "interface members can only be empty property declarations, " +
+            "empty functions, or goog.abstractMethod"));
   }
 
   public void testInterfaceNonEmptyFunction() throws Exception {
@@ -6117,13 +6126,11 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
   }
 
   public void testDirectPrototypeAssign() throws Exception {
+    // For now, we just ignore @type annotations on the prototype.
     testTypes(
         "/** @constructor */ function Foo() {}" +
         "/** @constructor */ function Bar() {}" +
-        "/** @type {Array} */ Bar.prototype = new Foo()",
-        "assignment to property prototype of Bar\n" +
-        "found   : Foo\n" +
-        "required: (Array|null|undefined)");
+        "/** @type {Array} */ Bar.prototype = new Foo()");
   }
 
   // In all testResolutionViaRegistry* tests, since u is unknown, u.T can only
@@ -6385,7 +6392,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         "  function g() { x = 'y'; } g(); " +
         "  return x === 3;" +
         "}",
-        "condition always evaluates to the same value\n" +
+        "condition always evaluates to false\n" +
         "left : (null|string|undefined)\n" +
         "right: number");
   }
@@ -6877,63 +6884,6 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         compiler.getWarnings()[0].description);
   }
 
-  public void testBadTemplateType1() throws Exception {
-    testTypes(
-        "/**\n" +
-        "* @param {T} x\n" +
-        "* @param {T} y\n" +
-        "* @param {function(this:T, ...)} z\n" +
-        "* @template T\n" +
-        "*/\n" +
-        "function f(x, y, z) {}\n" +
-        "f(this, this, function() { this });",
-        FunctionTypeBuilder.TEMPLATE_TYPE_DUPLICATED.format());
-  }
-
-  public void testBadTemplateType2() throws Exception {
-    testTypes(
-        "/**\n" +
-        "* @param {T} x\n" +
-        "* @param {function(this:T, ...)} y\n" +
-        "* @template T\n" +
-        "*/\n" +
-        "function f(x, y) {}\n" +
-        "f(0, function() {});",
-        TypeInference.TEMPLATE_TYPE_NOT_OBJECT_TYPE.format("number"));
-  }
-
-  public void testBadTemplateType3() throws Exception {
-    testTypes(
-        "/**\n" +
-        " * @param {T} x\n" +
-        " * @template T\n" +
-        "*/\n" +
-        "function f(x) {}\n" +
-        "f(this);",
-        TypeInference.TEMPLATE_TYPE_OF_THIS_EXPECTED.format());
-  }
-
-  public void testBadTemplateType4() throws Exception {
-    testTypes(
-        "/**\n" +
-        "* @template T\n" +
-        "*/\n" +
-        "function f() {}\n" +
-        "f();",
-        FunctionTypeBuilder.TEMPLATE_TYPE_EXPECTED.format());
-  }
-
-  public void testBadTemplateType5() throws Exception {
-    testTypes(
-        "/**\n" +
-        "* @template T\n" +
-        "* @return {T}\n" +
-        "*/\n" +
-        "function f() {}\n" +
-        "f();",
-        FunctionTypeBuilder.TEMPLATE_TYPE_EXPECTED.format());
-  }
-
   private void checkObjectType(ObjectType objectType, String propertyName,
         JSType expectedType) {
     assertTrue("Expected " + objectType.getReferenceName() +
@@ -6975,7 +6925,7 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
         0, compiler.getErrorCount());
 
     // For processing goog.addDependency for forward typedefs.
-    new ProcessClosurePrimitives(compiler, null, CheckLevel.ERROR, true)
+    new ProcessClosurePrimitives(compiler, null, CheckLevel.ERROR)
         .process(null, n);
 
     CodingConvention convention = compiler.getCodingConvention();
@@ -7058,8 +7008,8 @@ public class LooseTypeCheckTest extends CompilerTypeTestCase {
   private TypeCheckResult parseAndTypeCheckWithScope(
       String externs, String js) {
     compiler.init(
-        Lists.newArrayList(JSSourceFile.fromCode("[externs]", externs)),
-        Lists.newArrayList(JSSourceFile.fromCode("[testcode]", js)),
+        Lists.newArrayList(SourceFile.fromCode("[externs]", externs)),
+        Lists.newArrayList(SourceFile.fromCode("[testcode]", js)),
         compiler.getOptions());
 
     Node n = compiler.getInput(new InputId("[testcode]")).getAstRoot(compiler);

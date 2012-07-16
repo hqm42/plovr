@@ -25,6 +25,7 @@ import static com.google.javascript.rhino.jstype.JSTypeNative.VOID_TYPE;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.Scope.Var;
@@ -83,7 +84,7 @@ final class FunctionTypeBuilder {
   private boolean isConstructor = false;
   private boolean isInterface = false;
   private Node parametersNode = null;
-  private String templateTypeName = null;
+  private ImmutableList<String> templateTypeNames = ImmutableList.of();
 
   static final DiagnosticType EXTENDS_WITHOUT_TYPEDEF = DiagnosticType.warning(
       "JSC_EXTENDS_WITHOUT_TYPEDEF",
@@ -288,9 +289,10 @@ final class FunctionTypeBuilder {
         }
       }
 
-      // Clone any remaining params that aren't in the function literal.
+      // Clone any remaining params that aren't in the function literal,
+      // but make them optional.
       while (oldParams.hasNext()) {
-        paramBuilder.newParameterFromNode(oldParams.next());
+        paramBuilder.newOptionalParameterFromNode(oldParams.next());
       }
 
       parametersNode = paramBuilder.build();
@@ -307,11 +309,6 @@ final class FunctionTypeBuilder {
       returnTypeInferred = false;
     }
 
-    if (templateTypeName != null &&
-        returnType != null &&
-        returnType.restrictByNotNullOrUndefined().isTemplateType()) {
-      reportError(TEMPLATE_TYPE_EXPECTED, fnName);
-    }
     return this;
   }
 
@@ -465,13 +462,6 @@ final class FunctionTypeBuilder {
         parameterType = typeRegistry.getNativeType(UNKNOWN_TYPE);
       }
 
-      if (templateTypeName != null &&
-          parameterType.restrictByNotNullOrUndefined().isTemplateType()) {
-        if (foundTemplateType) {
-          reportError(TEMPLATE_TYPE_DUPLICATED, fnName);
-        }
-        foundTemplateType = true;
-      }
       warnedAboutArgList |= addParameter(
           builder, parameterType, warnedAboutArgList,
           isOptionalParam,
@@ -488,10 +478,6 @@ final class FunctionTypeBuilder {
         builder.newParameterFromNode(oldParameterType);
         oldParameterType = oldParameterType.getNext();
       }
-    }
-
-    if (templateTypeName != null && !foundTemplateType) {
-      reportError(TEMPLATE_TYPE_EXPECTED, fnName);
     }
 
     for (String inexistentName : allJsDocParams) {
@@ -536,8 +522,8 @@ final class FunctionTypeBuilder {
    */
   FunctionTypeBuilder inferTemplateTypeName(@Nullable JSDocInfo info) {
     if (info != null) {
-      templateTypeName = info.getTemplateTypeName();
-      typeRegistry.setTemplateTypeName(templateTypeName);
+      templateTypeNames = info.getTemplateTypeNames();
+      typeRegistry.setTemplateTypeNames(templateTypeNames);
     }
     return this;
   }
@@ -588,10 +574,23 @@ final class FunctionTypeBuilder {
    * Builds the function type, and puts it in the registry.
    */
   FunctionType buildAndRegister() {
-    if (returnType == null &&
-        !contents.mayHaveNonEmptyReturns() && !contents.mayBeFromExterns()) {
-      returnType = typeRegistry.getNativeType(VOID_TYPE);
-      returnTypeInferred = true;
+    if (returnType == null) {
+      // Infer return types.
+      // We need to be extremely conservative about this, because of two
+      // competing needs.
+      // 1) If we infer the return type of f too widely, then we won't be able
+      //    to assign f to other functions.
+      // 2) If we infer the return type of f too narrowly, then we won't be
+      //    able to override f in subclasses.
+      // So we only infer in cases where the user doesn't expect to write
+      // @return annotations--when it's very obvious that the function returns
+      // nothing.
+      if (!contents.mayHaveNonEmptyReturns() &&
+          !contents.mayHaveSingleThrow() &&
+          !contents.mayBeFromExterns()) {
+        returnType = typeRegistry.getNativeType(VOID_TYPE);
+        returnTypeInferred = true;
+      }
     }
 
     if (returnType == null) {
@@ -620,7 +619,7 @@ final class FunctionTypeBuilder {
           .withParamsNode(parametersNode)
           .withReturnType(returnType, returnTypeInferred)
           .withTypeOfThis(thisType)
-          .withTemplateName(templateTypeName)
+          .withTemplateNames(templateTypeNames)
           .build();
       maybeSetBaseType(fnType);
     }
@@ -633,7 +632,7 @@ final class FunctionTypeBuilder {
       fnType.setExtendedInterfaces(extendedInterfaces);
     }
 
-    typeRegistry.clearTemplateTypeName();
+    typeRegistry.clearTemplateTypeNames();
 
     return fnType;
   }
@@ -704,7 +703,7 @@ final class FunctionTypeBuilder {
   }
 
   /**
-   * Determines whether the given jsdoc info declares a function type.
+   * Determines whether the given JsDoc info declares a function type.
    */
   static boolean isFunctionTypeDeclaration(JSDocInfo info) {
     return info.getParameterCount() > 0 ||
@@ -734,7 +733,7 @@ final class FunctionTypeBuilder {
   /**
    * Check whether a type is resolvable in the future
    * If this has a supertype that hasn't been resolved yet, then we can assume
-   * this type will be ok once the super type resolves.
+   * this type will be OK once the super type resolves.
    * @param objectType
    * @return true if objectType is resolvable in the future
    */
@@ -772,8 +771,14 @@ final class FunctionTypeBuilder {
     /** Returns if a return of a real value (not undefined) appears. */
     boolean mayHaveNonEmptyReturns();
 
+    /** Returns if this consists of a single throw. */
+    boolean mayHaveSingleThrow();
+
     /** Gets a list of variables in this scope that are escaped. */
     Iterable<String> getEscapedVarNames();
+
+    /** Gets a list of variables whose properties are escaped. */
+    Set<String> getEscapedQualifiedNames();
   }
 
   static class UnknownFunctionContents implements FunctionContents {
@@ -800,8 +805,18 @@ final class FunctionTypeBuilder {
     }
 
     @Override
+    public boolean mayHaveSingleThrow() {
+      return true;
+    }
+
+    @Override
     public Iterable<String> getEscapedVarNames() {
       return ImmutableList.of();
+    }
+
+    @Override
+    public Set<String> getEscapedQualifiedNames() {
+      return ImmutableSet.of();
     }
   }
 
@@ -809,6 +824,7 @@ final class FunctionTypeBuilder {
     private final Node n;
     private boolean hasNonEmptyReturns = false;
     private Set<String> escapedVarNames;
+    private Set<String> escapedQualifiedNames;
 
     AstFunctionContents(Node n) {
       this.n = n;
@@ -834,6 +850,12 @@ final class FunctionTypeBuilder {
     }
 
     @Override
+    public boolean mayHaveSingleThrow() {
+      Node block = n.getLastChild();
+      return block.hasOneChild() && block.getFirstChild().isThrow();
+    }
+
+    @Override
     public Iterable<String> getEscapedVarNames() {
       return escapedVarNames == null
           ? ImmutableList.<String>of() : escapedVarNames;
@@ -844,6 +866,19 @@ final class FunctionTypeBuilder {
         escapedVarNames = Sets.newHashSet();
       }
       escapedVarNames.add(name);
+    }
+
+    @Override
+    public Set<String> getEscapedQualifiedNames() {
+      return escapedQualifiedNames == null
+          ? ImmutableSet.<String>of() : escapedQualifiedNames;
+    }
+
+    void recordEscapedQualifiedName(String name) {
+      if (escapedQualifiedNames == null) {
+        escapedQualifiedNames = Sets.newHashSet();
+      }
+      escapedQualifiedNames.add(name);
     }
   }
 }

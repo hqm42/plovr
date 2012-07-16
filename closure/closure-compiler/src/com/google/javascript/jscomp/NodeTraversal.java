@@ -31,7 +31,7 @@ import java.util.Set;
 
 
 /**
- * Nodetraversal allows an iteration through the nodes in the parse tree,
+ * NodeTraversal allows an iteration through the nodes in the parse tree,
  * and facilitates the optimizations on the parse tree.
  *
  */
@@ -376,7 +376,7 @@ public class NodeTraversal {
    * root).
    *
    * @param node the node to traverse
-   * @param parent the node's parent, it may be not be {@code null}
+   * @param parent the node's parent, it may not be {@code null}
    * @param refinedScope the refined scope of the scope currently at the top of
    *     the scope stack or in trivial cases that very scope or {@code null}
    */
@@ -538,7 +538,7 @@ public class NodeTraversal {
 
     // Body
     Preconditions.checkState(body.getNext() == null &&
-            body.isBlock());
+            body.isBlock(), body);
     traverseBranch(body, n);
 
     popScope();

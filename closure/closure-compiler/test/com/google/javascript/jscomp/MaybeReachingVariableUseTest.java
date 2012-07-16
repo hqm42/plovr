@@ -35,7 +35,7 @@ public class MaybeReachingVariableUseTest extends TestCase {
   private List<Node> uses = null;
 
   /*
-   * The test cases consist of a short code snipplet that has an instruction
+   * The test cases consist of a short code snippet that has an instruction
    * labeled with D and one or more with label starting with U. When assertMatch
    * is called, the test suite verifies that all the uses with label starting
    * with U is reachable to the definition label at D.
@@ -101,7 +101,8 @@ public class MaybeReachingVariableUseTest extends TestCase {
   }
 
   public void testForIn() {
-    assertMatch("D: var x = []; U: for (var y in x) { }");
+    // Uses within FOR-IN header are hard to test. They are covered
+    // by the tests in the flow sensitive inliner.
     assertNotMatch("D: var x = [], foo; U: for (x in foo) { }");
     assertNotMatch("D: var x = [], foo; for (x in foo) { U:x }");
     assertMatch("var x = [], foo; D: for (x in foo) { U:x }");

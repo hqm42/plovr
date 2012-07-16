@@ -81,6 +81,8 @@ public class ScriptRuntime {
     public static BaseFunction typeErrorThrower() {
       if (THROW_TYPE_ERROR == null) {
         BaseFunction thrower = new BaseFunction() {
+          static final long serialVersionUID = -5891740962154902286L;
+
           @Override
           public Object call(Context cx, Scriptable scope, Scriptable thisObj, Object[] args) {
             throw typeError0("msg.op.not.allowed");
@@ -153,36 +155,15 @@ public class ScriptRuntime {
 
     public final static Class<?>
         ContextClass
-            = Kit.classOrNull(JarJarHelper.javascriptPrefix + ".Context"),
+            = Kit.classOrNull("org.mozilla.javascript.Context"),
         ContextFactoryClass
-            = Kit.classOrNull(JarJarHelper.javascriptPrefix + ".ContextFactory"),
+            = Kit.classOrNull("org.mozilla.javascript.ContextFactory"),
         FunctionClass
-            = Kit.classOrNull(JarJarHelper.javascriptPrefix + ".Function"),
+            = Kit.classOrNull("org.mozilla.javascript.Function"),
         ScriptableObjectClass
-            = Kit.classOrNull(JarJarHelper.javascriptPrefix + ".ScriptableObject");
+            = Kit.classOrNull("org.mozilla.javascript.ScriptableObject");
     public static final Class<Scriptable> ScriptableClass =
         Scriptable.class;
-
-    private static final String[] lazilyNames = {
-        "RegExp",        JarJarHelper.javascriptPrefix + ".regexp.NativeRegExp",
-        "Packages",      JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "java",          JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "javax",         JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "org",           JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "com",           JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "edu",           JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "net",           JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "getClass",      JarJarHelper.javascriptPrefix + ".NativeJavaTopPackage",
-        "JavaAdapter",   JarJarHelper.javascriptPrefix + ".JavaAdapter",
-        "JavaImporter",  JarJarHelper.javascriptPrefix + ".ImporterTopLevel",
-        "Continuation",  JarJarHelper.javascriptPrefix + ".NativeContinuation",
-        //	TODO	Grotesque hack using literal string (xml) just to minimize
-		//			changes for now
-        "XML",           "(xml)",
-        "XMLList",       "(xml)",
-        "Namespace",     "(xml)",
-        "QName",         "(xml)",
-    };
 
     // Locale object used to request locale-neutral operations.
     public static Locale ROOT_LOCALE = new Locale("");
@@ -250,16 +231,31 @@ public class ScriptRuntime {
         boolean withXml = cx.hasFeature(Context.FEATURE_E4X) &&
                           cx.getE4xImplementationFactory() != null;
 
-        for (int i = 0; i != lazilyNames.length; i += 2) {
-            String topProperty = lazilyNames[i];
-            String className = lazilyNames[i + 1];
-            if (!withXml && className.equals("(xml)")) {
-                continue;
-            } else if (withXml && className.equals("(xml)")) {
-				className = cx.getE4xImplementationFactory().
-                               getImplementationClassName();
-			}
-            new LazilyLoadedCtor(scope, topProperty, className, sealed, true);
+        // define lazy-loaded properties using their class name
+        new LazilyLoadedCtor(scope, "RegExp",
+                "org.mozilla.javascript.regexp.NativeRegExp", sealed, true);
+        new LazilyLoadedCtor(scope, "Packages",
+                "org.mozilla.javascript.NativeJavaTopPackage", sealed, true);
+        new LazilyLoadedCtor(scope, "getClass",
+                "org.mozilla.javascript.NativeJavaTopPackage", sealed, true);
+        new LazilyLoadedCtor(scope, "JavaAdapter",
+                "org.mozilla.javascript.JavaAdapter", sealed, true);
+        new LazilyLoadedCtor(scope, "JavaImporter",
+                "org.mozilla.javascript.ImporterTopLevel", sealed, true);
+        new LazilyLoadedCtor(scope, "Continuation",
+                "org.mozilla.javascript.NativeContinuation", sealed, true);
+
+        for (String packageName : getTopPackageNames()) {
+            new LazilyLoadedCtor(scope, packageName,
+                    "org.mozilla.javascript.NativeJavaTopPackage", sealed, true);
+        }
+
+        if (withXml) {
+            String xmlImpl = cx.getE4xImplementationFactory().getImplementationClassName();
+            new LazilyLoadedCtor(scope, "XML", xmlImpl, sealed, true);
+            new LazilyLoadedCtor(scope, "XMLList", xmlImpl, sealed, true);
+            new LazilyLoadedCtor(scope, "Namespace", xmlImpl, sealed, true);
+            new LazilyLoadedCtor(scope, "QName", xmlImpl, sealed, true);
         }
 
         if (scope instanceof TopLevel) {
@@ -267,6 +263,13 @@ public class ScriptRuntime {
         }
 
         return scope;
+    }
+
+    static String[] getTopPackageNames() {
+        // Include "android" top package if running on Android
+        return "Dalvik".equals(System.getProperty("java.vm.name")) ?
+            new String[] { "java", "javax", "org", "com", "edu", "net", "android" } :
+            new String[] { "java", "javax", "org", "com", "edu", "net" };
     }
 
     public static ScriptableObject getLibraryScopeOrNull(Scriptable scope)
@@ -1321,6 +1324,7 @@ public class ScriptRuntime {
             if (c == '-') {
                 if (len > 1) {
                     c = str.charAt(1);
+                    if (c == '0') return -1L; // "-0" is not an index
                     i = 1;
                     negate = true;
                 }
@@ -3029,7 +3033,7 @@ public class ScriptRuntime {
     public static boolean in(Object a, Object b, Context cx)
     {
         if (!(b instanceof Scriptable)) {
-            throw typeError0("msg.instanceof.not.object");
+            throw typeError0("msg.in.not.object");
         }
 
         return hasObjectElem((Scriptable)b, a, cx);
@@ -3080,7 +3084,7 @@ public class ScriptRuntime {
     // ------------------
 
     public static ScriptableObject getGlobal(Context cx) {
-        final String GLOBAL_CLASS = JarJarHelper.javascriptPrefix + ".tools.shell.Global";
+        final String GLOBAL_CLASS = "org.mozilla.javascript.tools.shell.Global";
         Class<?> globalClass = Kit.classOrNull(GLOBAL_CLASS);
         if (globalClass != null) {
             try {
@@ -3669,7 +3673,7 @@ public class ScriptRuntime {
     private static class DefaultMessageProvider implements MessageProvider {
         public String getMessage(String messageId, Object[] arguments) {
             final String defaultResource
-                = JarJarHelper.javascriptPrefix + ".resources.Messages";
+                = "org.mozilla.javascript.resources.Messages";
 
             Context cx = Context.getCurrentContext();
             Locale locale = cx != null ? cx.getLocale() : Locale.getDefault();

@@ -144,7 +144,7 @@ public class DefaultPassConfig extends PassConfig {
   }
 
   @Override
-  State getIntermediateState() {
+  protected State getIntermediateState() {
     return new State(
         cssNames == null ? null : Maps.newHashMap(cssNames),
         exportedNames == null ? null :
@@ -154,7 +154,7 @@ public class DefaultPassConfig extends PassConfig {
   }
 
   @Override
-  void setIntermediateState(State state) {
+  protected void setIntermediateState(State state) {
     this.cssNames = state.cssNames == null ? null :
         Maps.newHashMap(state.cssNames);
     this.exportedNames = state.exportedNames == null ? null :
@@ -190,6 +190,8 @@ public class DefaultPassConfig extends PassConfig {
   protected List<PassFactory> getChecks() {
     List<PassFactory> checks = Lists.newArrayList();
 
+    checks.add(createEmptyPass("beforeStandardChecks"));
+
     if (options.closurePass) {
       checks.add(closureGoogScopeAliases);
     }
@@ -203,6 +205,10 @@ public class DefaultPassConfig extends PassConfig {
         checks.add(nameUnmappedAnonymousFunctions);
       }
       return checks;
+    }
+
+    if (options.jqueryPass) {
+      checks.add(jqueryAliases.makeOneTimePass());
     }
 
     checks.add(checkSideEffects);
@@ -239,10 +245,6 @@ public class DefaultPassConfig extends PassConfig {
 
     if (options.closurePass) {
       checks.add(closurePrimitives.makeOneTimePass());
-    }
-
-    if (options.jqueryPass) {
-      checks.add(jqueryAliases.makeOneTimePass());
     }
 
     if (options.closurePass && options.checkMissingGetCssNameLevel.isOn()) {
@@ -413,9 +415,9 @@ public class DefaultPassConfig extends PassConfig {
 
     // Constant checking must be done after property collapsing because
     // property collapsing can introduce new constants (e.g. enum values).
-    if (options.inlineConstantVars) {
-      passes.add(checkConsts);
-    }
+    // TODO(johnlenz): make checkConsts namespace aware so it can be run
+    // as during the checks phase.
+    passes.add(checkConsts);
 
     // The Caja library adds properties to Object.prototype, which breaks
     // most for-in loops.  This adds a check to each loop that skips
@@ -449,7 +451,7 @@ public class DefaultPassConfig extends PassConfig {
       passes.add(crossModuleCodeMotion);
     }
 
-    // Method devirtualization benefits from property disambiguiation so
+    // Method devirtualization benefits from property disambiguation so
     // it should run after that pass but before passes that do
     // optimizations based on global names (like cross module code motion
     // and inline functions).  Smart Name Removal does better if run before
@@ -565,14 +567,6 @@ public class DefaultPassConfig extends PassConfig {
       passes.add(gatherRawExports);
     }
 
-    boolean scopeGlobalVariables = !((PlovrCompilerOptions)options).globalScopeName.isEmpty();
-    if (scopeGlobalVariables) {
-      if (exportedNames == null) {
-        exportedNames = Sets.newHashSet();
-      }
-      exportedNames.add(((PlovrCompilerOptions)options).globalScopeName);
-    }
-
     // This comes after property renaming because quoted property names must
     // not be renamed.
     if (options.convertToDottedProperties) {
@@ -599,12 +593,6 @@ public class DefaultPassConfig extends PassConfig {
 
     if (options.aliasKeywords) {
       passes.add(aliasKeywords);
-    }
-
-    if (scopeGlobalVariables) {
-      // If we're putting everything into a global scope, we can't
-      // have named functions.
-      passes.add(anonymizeNamedFunctions);
     }
 
     // Passes after this point can no longer depend on normalized AST
@@ -683,11 +671,6 @@ public class DefaultPassConfig extends PassConfig {
     passes.add(sanityCheckAst);
     passes.add(sanityCheckVars);
 
-    // The resulting AST is not sane without the surrounding with.
-    if (scopeGlobalVariables) {
-      passes.add(addScopeToGlobals);
-    }
-
     return passes;
   }
 
@@ -702,6 +685,10 @@ public class DefaultPassConfig extends PassConfig {
 
     if (options.inlineFunctions || options.inlineLocalFunctions) {
       passes.add(inlineFunctions);
+    }
+
+    if (options.inlineProperties) {
+      passes.add(inlineProperties);
     }
 
     boolean runOptimizeCalls = options.optimizeCalls
@@ -748,6 +735,9 @@ public class DefaultPassConfig extends PassConfig {
 
     if (options.removeUnusedPrototypeProperties) {
       passes.add(removeUnusedPrototypeProperties);
+    }
+
+    if (options.removeUnusedClassProperties && !isInliningForbidden()) {
       passes.add(removeUnusedClassProperties);
     }
 
@@ -880,7 +870,7 @@ public class DefaultPassConfig extends PassConfig {
     }
   };
 
-  /** Generates exports for functions associated with JSUnit. */
+  /** Generates exports for functions associated with JsUnit. */
   final PassFactory exportTestFunctions =
       new PassFactory("exportTestFunctions", true) {
     @Override
@@ -927,8 +917,7 @@ public class DefaultPassConfig extends PassConfig {
       final ProcessClosurePrimitives pass = new ProcessClosurePrimitives(
           compiler,
           preprocessorSymbolTable,
-          options.brokenClosureRequiresLevel,
-          options.rewriteNewDateGoogNow);
+          options.brokenClosureRequiresLevel);
 
       return new HotSwapCompilerPass() {
         @Override
@@ -1261,7 +1250,7 @@ public class DefaultPassConfig extends PassConfig {
           // Create a global namespace for analysis by check passes.
           // Note that this class does all heavy computation lazily,
           // so it's OK to create it here.
-          namespaceForChecks = new GlobalNamespace(compiler, jsRoot);
+          namespaceForChecks = new GlobalNamespace(compiler, externs, jsRoot);
           new CheckGlobalNames(compiler, options.checkGlobalNamesLevel)
               .injectNamespace(namespaceForChecks).process(externs, jsRoot);
         }
@@ -1361,7 +1350,7 @@ public class DefaultPassConfig extends PassConfig {
     }
   };
 
-  /** Inserts runtime type assertions for debugging. */
+  /** Inserts run-time type assertions for debugging. */
   final PassFactory runtimeTypeCheck =
       new PassFactory("runtimeTypeCheck", true) {
     @Override
@@ -1379,7 +1368,8 @@ public class DefaultPassConfig extends PassConfig {
       return new CompilerPass() {
         @Override public void process(Node externs, Node root) {
           ReplaceIdGenerators pass =
-              new ReplaceIdGenerators(compiler, options.idGenerators);
+              new ReplaceIdGenerators(
+                  compiler, options.idGenerators, options.generatePseudoNames);
           pass.process(externs, root);
           idGeneratorMap = pass.getIdGeneratorMap();
         }
@@ -1741,6 +1731,15 @@ public class DefaultPassConfig extends PassConfig {
           options.assumeStrictThis()
               || options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT,
           options.assumeClosuresOnlyCaptureReferences);
+    }
+  };
+
+  /** Inlines constant properties. */
+  final PassFactory inlineProperties =
+      new PassFactory("inlineProperties", false) {
+    @Override
+    protected CompilerPass createInternal(AbstractCompiler compiler) {
+      return new InlineProperties(compiler);
     }
   };
 
@@ -2168,22 +2167,6 @@ public class DefaultPassConfig extends PassConfig {
           }
         }
       };
-    }
-  };
-
-  private final PassFactory addScopeToGlobals =
-      new PassFactory("addScopeToGlobals", true) {
-    @Override
-    protected CompilerPass createInternal(AbstractCompiler compiler) {
-      return new AddScopeToGlobals(compiler, ((PlovrCompilerOptions)options).globalScopeName);
-    }
-  };
-
-  private final PassFactory anonymizeNamedFunctions =
-      new PassFactory("anonymizeNamedFunctions", true) {
-    @Override
-    protected CompilerPass createInternal(AbstractCompiler compiler) {
-      return new AnonymizeNamedFunctions(compiler);
     }
   };
 

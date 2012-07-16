@@ -37,6 +37,7 @@ import java.util.Set;
 public class CompilerOptions implements Serializable, Cloneable {
 
   // Unused. For people using reflection to circumvent access control.
+  @SuppressWarnings("unused")
   private boolean manageClosureDependencies = false;
 
   // A common enum for compiler passes that can run either globally or locally.
@@ -227,7 +228,7 @@ public class CompilerOptions implements Serializable, Cloneable {
    */
   public String checkMissingGetCssNameBlacklist;
 
-  /** Checks that the synctactic restrictions of Caja are met. */
+  /** Checks that the syntactic restrictions of Caja are met. */
   boolean checkCaja;
 
   public void setCheckCaja(boolean check) {
@@ -254,13 +255,17 @@ public class CompilerOptions implements Serializable, Cloneable {
   /** Inlines constants (symbols that are all CAPS) */
   public boolean inlineConstantVars;
 
-  /** Inlines short functions */
+  /** Inlines global functions */
   public boolean inlineFunctions;
 
-  /** Enhanced function inlining */
+  /** Inlines functions defined in local scopes */
   public boolean inlineLocalFunctions;
 
+  /** More aggressive function inlining */
   boolean assumeClosuresOnlyCaptureReferences;
+
+  /** Inlines properties */
+  boolean inlineProperties;
 
   /** Move code to a deeper module */
   public boolean crossModuleCodeMotion;
@@ -268,7 +273,7 @@ public class CompilerOptions implements Serializable, Cloneable {
   /** Merge two variables together as one. */
   public boolean coalesceVariableNames;
 
-  /** Move methds to a deeper module */
+  /** Move methods to a deeper module */
   public boolean crossModuleMethodMotion;
 
   /** Inlines trivial getters */
@@ -312,6 +317,9 @@ public class CompilerOptions implements Serializable, Cloneable {
 
   /** Tells AnalyzePrototypeProperties it can remove externed props. */
   public boolean removeUnusedPrototypePropertiesInExterns;
+
+  /** Removes unused member properties */
+  public boolean removeUnusedClassProperties;
 
   /** Removes unused variables */
   public boolean removeUnusedVars;
@@ -454,7 +462,7 @@ public class CompilerOptions implements Serializable, Cloneable {
   boolean collapseObjectLiterals;
 
   public void setCollapseObjectLiterals(boolean enabled) {
-    collapseObjectLiterals = true;
+    collapseObjectLiterals = enabled;
   }
 
   /** Flattens multi-level property names on extern types (e.g. String$f = x) */
@@ -509,11 +517,11 @@ public class CompilerOptions implements Serializable, Cloneable {
   // Special-purpose alterations
   //--------------------------------
 
-  /** Inserts runtime type assertions for debugging. */
+  /** Inserts run-time type assertions for debugging. */
   boolean runtimeTypeCheck;
 
   /**
-   * A JS function to be used for logging runtime type assertion
+   * A JS function to be used for logging run-time type assertion
    * failures. It will be passed the warning as a string and the
    * faulty expression as arguments.
    */
@@ -547,9 +555,6 @@ public class CompilerOptions implements Serializable, Cloneable {
 
   /** Processes jQuery aliases */
   public boolean jqueryPass;
-
-  /** Rewrite new Date(goog.now()) to new Date().  */
-  boolean rewriteNewDateGoogNow;
 
   /** Remove goog.abstractMethod assignments. */
   boolean removeAbstractMethods;
@@ -588,7 +593,7 @@ public class CompilerOptions implements Serializable, Cloneable {
   /** Replacements for tweaks. Will be Boolean, Numbers, or Strings */
   private Map<String, Object> tweakReplacements;
 
-  /** Move top level function declarations to the top */
+  /** Move top-level function declarations to the top */
   public boolean moveFunctionDeclarations;
 
   /** Instrumentation template to use with #recordFunctionInformation */
@@ -630,13 +635,13 @@ public class CompilerOptions implements Serializable, Cloneable {
   /** List of properties that we report invalidation errors for. */
   Map<String, CheckLevel> propertyInvalidationErrors;
 
-  /** Transform AMD to Common JS modules. */
+  /** Transform AMD to CommonJS modules. */
   boolean transformAMDToCJSModules = false;
 
-  /** Transform AMD to Common JS modules. */
+  /** Rewrite CommonJS modules so that they can be concatenated together. */
   boolean processCommonJSModules = false;
 
-  /** Common JS module prefix. */
+  /** CommonJS module prefix. */
   String commonJSModulePathPrefix =
       ProcessCommonJSModules.DEFAULT_FILENAME_PREFIX;
 
@@ -651,7 +656,10 @@ public class CompilerOptions implements Serializable, Cloneable {
   /** Line break the output a bit more aggressively */
   public boolean lineBreak;
 
-  /** Prints a separator comment before each js script */
+  /** Prefer line breaks at end of file */
+  public boolean preferLineBreakAtEndOfFile;
+
+  /** Prints a separator comment before each JS script */
   public boolean printInputDelimiter;
 
   /** The string to use as the separator for printInputDelimiter */
@@ -665,6 +673,10 @@ public class CompilerOptions implements Serializable, Cloneable {
   }
 
   TracerMode tracer;
+
+  public TracerMode getTracerMode() {
+    return tracer;
+  }
 
   public void setTracerMode(TracerMode mode) {
     tracer = mode;
@@ -754,6 +766,11 @@ public class CompilerOptions implements Serializable, Cloneable {
   private transient AliasTransformationHandler aliasHandler;
 
   /**
+   * Handler for compiler warnings and errors.
+   */
+  transient ErrorHandler errorHandler;
+
+  /**
    * Initializes compiler options. All options are disabled by default.
    *
    * Command-line frontends to the compiler should set these properties
@@ -801,6 +818,7 @@ public class CompilerOptions implements Serializable, Cloneable {
     inlineLocalFunctions = false;
     assumeStrictThis = false;
     assumeClosuresOnlyCaptureReferences = false;
+    inlineProperties = false;
     crossModuleCodeMotion = false;
     crossModuleMethodMotion = false;
     inlineGetters = false;
@@ -811,6 +829,7 @@ public class CompilerOptions implements Serializable, Cloneable {
     extractPrototypeMemberDeclarations = false;
     removeUnusedPrototypeProperties = false;
     removeUnusedPrototypePropertiesInExterns = false;
+    removeUnusedClassProperties = false;
     removeUnusedVars = false;
     removeUnusedLocalVars = false;
     aliasExternals = false;
@@ -855,7 +874,6 @@ public class CompilerOptions implements Serializable, Cloneable {
     removeTryCatchFinally = false;
     closurePass = false;
     jqueryPass = false;
-    rewriteNewDateGoogNow = true;
     removeAbstractMethods = true;
     removeClosureAsserts = false;
     stripTypes = Collections.emptySet();
@@ -884,6 +902,7 @@ public class CompilerOptions implements Serializable, Cloneable {
     printInputDelimiter = false;
     prettyPrint = false;
     lineBreak = false;
+    preferLineBreakAtEndOfFile = false;
     reportPath = null;
     tracer = TracerMode.OFF;
     colorizeErrorOutput = false;
@@ -895,6 +914,22 @@ public class CompilerOptions implements Serializable, Cloneable {
 
     // Debugging
     aliasHandler = NULL_ALIAS_TRANSFORMATION_HANDLER;
+    errorHandler = null;
+  }
+
+  /**
+   * @return Whether to attempt to remove unused class properties
+   */
+  public boolean isRemoveUnusedClassProperties() {
+    return removeUnusedClassProperties;
+  }
+
+  /**
+   * @param removeUnusedClassProperties Whether to attempt to remove
+   *      unused class properties
+   */
+  public void setRemoveUnusedClassProperties(boolean removeUnusedClassProperties) {
+    this.removeUnusedClassProperties = removeUnusedClassProperties;
   }
 
   /**
@@ -1149,6 +1184,13 @@ public class CompilerOptions implements Serializable, Cloneable {
   }
 
   /**
+   * Set the function inlining policy for the compiler.
+   */
+  public void setInlineProperties(boolean enable) {
+    inlineProperties = enable;
+  }
+
+  /**
    * Set the variable removal policy for the compiler.
    */
   @Deprecated
@@ -1188,8 +1230,8 @@ public class CompilerOptions implements Serializable, Cloneable {
         Lists.newArrayList(functionDescriptors);
   }
 
+  @Deprecated
   public void setRewriteNewDateGoogNow(boolean rewrite) {
-    this.rewriteNewDateGoogNow = rewrite;
   }
 
   public void setRemoveAbstractMethods(boolean remove) {
@@ -1230,9 +1272,9 @@ public class CompilerOptions implements Serializable, Cloneable {
   }
 
   /**
-   * Enable runtime type checking, which adds JS type assertions for debugging.
+   * Enable run-time type checking, which adds JS type assertions for debugging.
    *
-   * @param logFunction A JS function to be used for logging runtime type
+   * @param logFunction A JS function to be used for logging run-time type
    *     assertion failures.
    */
   public void enableRuntimeTypeCheck(String logFunction) {
@@ -1258,9 +1300,10 @@ public class CompilerOptions implements Serializable, Cloneable {
 
   /**
    * Sets dependency options. See the DependencyOptions class for more info.
-   * This supercedes manageClosureDependencies.
+   * This supersedes manageClosureDependencies.
    */
   public void setDependencyOptions(DependencyOptions options) {
+    Preconditions.checkNotNull(options);
     this.dependencyOptions = options;
   }
 
@@ -1269,8 +1312,10 @@ public class CompilerOptions implements Serializable, Cloneable {
    * whose symbols are not required.
    */
   public void setManageClosureDependencies(boolean newVal) {
-    dependencyOptions.setDependencySorting(newVal);
-    dependencyOptions.setDependencyPruning(newVal);
+    dependencyOptions.setDependencySorting(
+        newVal || dependencyOptions.shouldSortDependencies());
+    dependencyOptions.setDependencyPruning(
+        newVal || dependencyOptions.shouldPruneDependencies());
     dependencyOptions.setMoocherDropping(false);
     manageClosureDependencies = newVal;
   }
@@ -1376,6 +1421,22 @@ public class CompilerOptions implements Serializable, Cloneable {
 
   public AliasTransformationHandler getAliasTransformationHandler() {
     return this.aliasHandler;
+  }
+
+  /**
+   * Set a custom handler for warnings and errors.
+   *
+   * This is mostly used for piping the warnings and errors to
+   * a file behind the scenes.
+   *
+   * If you want to filter warnings and errors, you should use a WarningsGuard.
+   *
+   * If you want to change how warnings and errors are reported to the user,
+   * you should set a ErrorManager on the Compiler. An ErrorManager is
+   * intended to summarize the errors for a single compile job.
+   */
+  public void setErrorHandler(ErrorHandler handler) {
+    this.errorHandler = handler;
   }
 
   /**
@@ -1783,6 +1844,10 @@ public class CompilerOptions implements Serializable, Cloneable {
     this.lineBreak = lineBreak;
   }
 
+  public void setPreferLineBreakAtEndOfFile(boolean lineBreakAtEnd) {
+    this.preferLineBreakAtEndOfFile = lineBreakAtEnd;
+  }
+
   public void setPrintInputDelimiter(boolean printInputDelimiter) {
     this.printInputDelimiter = printInputDelimiter;
   }
@@ -1832,21 +1897,22 @@ public class CompilerOptions implements Serializable, Cloneable {
   }
 
   /**
-   * Activates transformation of AMD to CJS modules.
+   * Activates transformation of AMD to CommonJS modules.
    */
   public void setTransformAMDToCJSModules(boolean transformAMDToCJSModules) {
     this.transformAMDToCJSModules = transformAMDToCJSModules;
   }
 
   /**
-   * Activates Common JS module processing.
+   * Rewrites CommonJS modules so that modules can be concatenated together,
+   * by renaming all globals to avoid conflicting with other modules.
    */
   public void setProcessCommonJSModules(boolean processCommonJSModules) {
     this.processCommonJSModules = processCommonJSModules;
   }
 
   /**
-   * Sets a path prefix for Common JS modules.
+   * Sets a path prefix for CommonJS modules.
    */
   public void setCommonJSModulePathPrefix(String commonJSModulePathPrefix) {
     this.commonJSModulePathPrefix = commonJSModulePathPrefix;
@@ -1859,7 +1925,7 @@ public class CompilerOptions implements Serializable, Cloneable {
   /** When to do the extra sanity checks */
   public static enum LanguageMode {
     /**
-     * Tranditional JavaScript
+     * Traditional JavaScript
      */
     ECMASCRIPT3,
 
@@ -1899,7 +1965,8 @@ public class CompilerOptions implements Serializable, Cloneable {
 
   public static enum TracerMode {
     ALL,  // Collect all timing and size metrics.
-    FAST, // Collect all timing and size metrics, except gzipped size.
+    RAW_SIZE, // Collect all timing and size metrics, except gzipped size.
+    TIMING_ONLY, // Collect timing metrics only.
     OFF;  // Collect no timing and size metrics.
 
     boolean isOn() {
@@ -1922,7 +1989,7 @@ public class CompilerOptions implements Serializable, Cloneable {
   }
 
   /**
-   * A Role Specific Interface for JsCompiler that represents a data holder
+   * A Role Specific Interface for JS Compiler that represents a data holder
    * object which is used to store goog.scope alias code changes to code made
    * during a compile. There is no guarantee that individual alias changes are
    * invoked in the order they occur during compilation, so implementations
@@ -1959,11 +2026,11 @@ public class CompilerOptions implements Serializable, Cloneable {
   }
 
   /**
-   * A Role Specific Interface for the JsCompiler to report aliases used to
+   * A Role Specific Interface for the JS Compiler to report aliases used to
    * change the code during a compile.
    * <p>
    * While aliases defined by goog.scope are expected to by only 1 per file, and
-   * the only top level structure in the file, this is not enforced.
+   * the only top-level structure in the file, this is not enforced.
    */
   public interface AliasTransformation {
 

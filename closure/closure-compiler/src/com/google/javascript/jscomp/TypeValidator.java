@@ -38,6 +38,7 @@ import com.google.javascript.rhino.jstype.JSType;
 import com.google.javascript.rhino.jstype.JSTypeNative;
 import com.google.javascript.rhino.jstype.JSTypeRegistry;
 import com.google.javascript.rhino.jstype.ObjectType;
+import com.google.javascript.rhino.jstype.StaticSlot;
 
 import java.text.MessageFormat;
 import java.util.Iterator;
@@ -135,7 +136,7 @@ class TypeValidator {
    * Gets a list of type violations.
    *
    * For each violation, one element is the expected type and the other is
-   * the type that is actually found. Order is not signficant.
+   * the type that is actually found. Order is not significant.
    */
   Iterable<TypeMismatch> getMismatches() {
     return mismatches;
@@ -342,13 +343,25 @@ class TypeValidator {
    */
   boolean expectCanAssignToPropertyOf(NodeTraversal t, Node n, JSType rightType,
       JSType leftType, Node owner, String propName) {
-    // The NoType check is a hack to make typedefs work ok.
+    // The NoType check is a hack to make typedefs work OK.
     if (!leftType.isNoType() && !rightType.canAssignTo(leftType)) {
       if (bothIntrinsics(rightType, leftType)) {
         // We have a superior warning for this mistake, which gives you
         // the line numbers of both types.
         registerMismatch(rightType, leftType, null);
       } else {
+        // Do not type-check interface methods, because we expect that
+        // they will have dummy implementations that do not match the type
+        // annotations.
+        JSType ownerType = getJSType(owner);
+        if (ownerType.isFunctionPrototypeType()) {
+          FunctionType ownerFn = ownerType.toObjectType().getOwnerFunction();
+          if (ownerFn.isInterface() &&
+              rightType.isFunctionType() && leftType.isFunctionType()) {
+            return true;
+          }
+        }
+
         mismatch(t, n,
             "assignment to property " + propName + " of " +
             getReadableJSTypeName(owner, true),
@@ -570,7 +583,7 @@ class TypeValidator {
     for (ObjectType implemented : type.getAllImplementedInterfaces()) {
       if (implemented.getImplicitPrototype() != null) {
         for (String prop :
-            implemented.getImplicitPrototype().getOwnPropertyNames()) {
+             implemented.getImplicitPrototype().getOwnPropertyNames()) {
           expectInterfaceProperty(t, n, instance, implemented, prop);
         }
       }
@@ -578,12 +591,13 @@ class TypeValidator {
   }
 
   /**
-   * Expect that the peroperty in an interface that this type implements is
+   * Expect that the property in an interface that this type implements is
    * implemented and correctly typed.
    */
   private void expectInterfaceProperty(NodeTraversal t, Node n,
       ObjectType instance, ObjectType implementedInterface, String prop) {
-    if (!instance.hasProperty(prop)) {
+    StaticSlot<JSType> propSlot = instance.getSlot(prop);
+    if (propSlot == null) {
       // Not implemented
       String sourceName = n.getSourceFileName();
       sourceName = sourceName == null ? "" : sourceName;
@@ -592,16 +606,23 @@ class TypeValidator {
           INTERFACE_METHOD_NOT_IMPLEMENTED,
           prop, implementedInterface.toString(), instance.toString())));
     } else {
-      JSType found = instance.getPropertyType(prop);
+      Node propNode = propSlot.getDeclaration() == null ?
+          null : propSlot.getDeclaration().getNode();
+
+      // Fall back on the constructor node if we can't find a node for the
+      // property.
+      propNode = propNode == null ? n : propNode;
+
+      JSType found = propSlot.getType();
       JSType required
-        = implementedInterface.getImplicitPrototype().getPropertyType(prop);
+          = implementedInterface.getImplicitPrototype().getPropertyType(prop);
       found = found.restrictByNotNullOrUndefined();
       required = required.restrictByNotNullOrUndefined();
       if (!found.canAssignTo(required)) {
         // Implemented, but not correctly typed
-        FunctionType constructor
-          = implementedInterface.toObjectType().getConstructor();
-        registerMismatch(found, required, report(t.makeError(n,
+        FunctionType constructor =
+            implementedInterface.toObjectType().getConstructor();
+        registerMismatch(found, required, report(t.makeError(propNode,
             HIDDEN_INTERFACE_PROPERTY_MISMATCH, prop,
             constructor.getTopMostDefiningType(prop).toString(),
             required.toString(), found.toString())));

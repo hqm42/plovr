@@ -89,13 +89,17 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
         }
 
         // TODO(user): We only care about calls to functions that
-        // passes one of the dependent variable to a non-sideeffect free
+        // passes one of the dependent variable to a non-side-effect free
         // function.
         if (n.isCall() && NodeUtil.functionCallHasSideEffects(n)) {
           return true;
         }
 
         if (n.isNew() && NodeUtil.constructorCallHasSideEffects(n)) {
+          return true;
+        }
+
+        if (n.isDelProp()) {
           return true;
         }
 
@@ -135,7 +139,7 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
     candidates = Lists.newLinkedList();
 
     // Using the forward reaching definition search to find all the inline
-    // candiates
+    // candidates
     new NodeTraversal(compiler, new GatherCandiates()).traverse(
         t.getScopeRoot().getLastChild());
 
@@ -154,7 +158,7 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
 
   @Override
   public void process(Node externs, Node root) {
-    (new NodeTraversal(compiler, this)).traverse(root);
+    (new NodeTraversal(compiler, this)).traverseRoots(externs, root);
   }
 
   @Override
@@ -169,7 +173,7 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
   /**
    * Gathers a list of possible candidates for inlining based only on
    * information from {@link MustBeReachingVariableDef}. The list will be stored
-   * in {@code candidiates} and the validity of each inlining Candidate should
+   * in {@code candidates} and the validity of each inlining Candidate should
    * be later verified with {@link Candidate#canInline()} when
    * {@link MaybeReachingVariableUse} has been performed.
    */
@@ -191,11 +195,16 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
         public void visit(NodeTraversal t, Node n, Node parent) {
           if (n.isName()) {
 
+            // n.getParent() isn't null. This just the case where n is the root
+            // node that gatherCb started at.
+            if (parent == null) {
+              return;
+            }
+
             // Make sure that the name node is purely a read.
             if ((NodeUtil.isAssignmentOp(parent) && parent.getFirstChild() == n)
-                || parent.isVar() || parent.isInc() ||
-                parent.isDec() || parent.isParamList() ||
-                parent.isCatch()) {
+                || parent.isVar() || parent.isInc() || parent.isDec() ||
+                parent.isParamList() || parent.isCatch()) {
               return;
             }
 
@@ -205,6 +214,8 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
             }
 
             Node defNode = reachingDef.getDef(name, cfgNode);
+            // TODO(nicksantos): We need to add some notion of @const outer
+            // scope vars. We can inline those just fine.
             if (defNode != null &&
                 !reachingDef.dependsOnOuterScopeVars(name, cfgNode)) {
               candidates.add(new Candidate(name, defNode, n, cfgNode));
@@ -282,7 +293,7 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
       }
 
 
-      // TODO(user): Side-effect is ok sometimes. As long as there are no
+      // TODO(user): Side-effect is OK sometimes. As long as there are no
       // side-effect function down all paths to the use. Once we have all the
       // side-effect analysis tool.
       if (NodeUtil.mayHaveSideEffects(def.getLastChild())) {
@@ -310,7 +321,7 @@ class FlowSensitiveInlineVariables extends AbstractPostOrderCallback
         return false;
       }
 
-      // We give up inling stuff with R-Value that has GETPROP, GETELEM,
+      // We give up inlining stuff with R-Value that has GETPROP, GETELEM,
       // or anything that creates a new object.
       // Example:
       // var x = a.b.c; j.c = 1; print(x);

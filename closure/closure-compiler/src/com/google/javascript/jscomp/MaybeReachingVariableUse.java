@@ -23,6 +23,7 @@ import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.ControlFlowGraph.Branch;
 import com.google.javascript.jscomp.Scope.Var;
 import com.google.javascript.jscomp.graph.GraphNode;
+import com.google.javascript.jscomp.graph.LatticeElement;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
@@ -52,7 +53,7 @@ class MaybeReachingVariableUse extends
     this.jsScope = jsScope;
     this.escaped = Sets.newHashSet();
 
-    // TODO(user): May be comute it somewhere else and re-use the escape
+    // TODO(user): Maybe compute it somewhere else and re-use the escape
     // local set here.
     computeEscaped(jsScope, escaped, compiler);
   }

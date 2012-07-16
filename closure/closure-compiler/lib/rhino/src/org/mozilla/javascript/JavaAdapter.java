@@ -140,8 +140,7 @@ public final class JavaAdapter implements IdFunctionCall
         return Context.jsToJava(result, c);
     }
 
-    public static Scriptable createAdapterWrapper(Scriptable obj,
-                                                  Object adapter)
+    public static Scriptable createAdapterWrapper(Scriptable obj, Object adapter)
     {
         Scriptable scope = ScriptableObject.getTopLevelScope(obj);
         NativeJavaObject res = new NativeJavaObject(scope, adapter, null, true);
@@ -163,17 +162,33 @@ public final class JavaAdapter implements IdFunctionCall
             throw ScriptRuntime.typeError0("msg.adapter.zero.args");
         }
 
-        Class<?> superClass = null;
-        Class<?>[] intfs = new Class[N - 1];
-        int interfaceCount = 0;
-        for (int i = 0; i != N - 1; ++i) {
-            Object arg = args[i];
+        // Expected arguments:
+        // Any number of NativeJavaClass objects representing the super-class
+        // and/or interfaces to implement, followed by one NativeObject providing
+        // the implementation, followed by any number of arguments to pass on
+        // to the (super-class) constructor.
+
+        int classCount;
+        for (classCount = 0; classCount < N - 1; classCount++) {
+            Object arg = args[classCount];
+            // We explicitly test for NativeObject here since checking for
+            // instanceof ScriptableObject or !(instanceof NativeJavaClass)
+            // would fail for a Java class that isn't found in the class path
+            // as NativeJavaPackage extends ScriptableObject.
+            if (arg instanceof NativeObject) {
+                break;
+            }
             if (!(arg instanceof NativeJavaClass)) {
                 throw ScriptRuntime.typeError2("msg.not.java.class.arg",
-                                               String.valueOf(i),
+                                               String.valueOf(classCount),
                                                ScriptRuntime.toString(arg));
             }
-            Class<?> c = ((NativeJavaClass) arg).getClassObject();
+        }
+        Class<?> superClass = null;
+        Class<?>[] intfs = new Class[classCount];
+        int interfaceCount = 0;
+        for (int i = 0; i < classCount; ++i) {
+            Class<?> c = ((NativeJavaClass) args[i]).getClassObject();
             if (!c.isInterface()) {
                 if (superClass != null) {
                     throw ScriptRuntime.typeError2("msg.only.one.super",
@@ -185,24 +200,49 @@ public final class JavaAdapter implements IdFunctionCall
             }
         }
 
-        if (superClass == null)
+        if (superClass == null) {
             superClass = ScriptRuntime.ObjectClass;
-
+        }
+        
         Class<?>[] interfaces = new Class[interfaceCount];
         System.arraycopy(intfs, 0, interfaces, 0, interfaceCount);
-        Scriptable obj = ScriptRuntime.toObject(cx, scope, args[N - 1]);
+        // next argument is implementation, must be scriptable
+        Scriptable obj = ScriptableObject.ensureScriptable(args[classCount]);
 
-        Class<?> adapterClass = getAdapterClass(scope, superClass, interfaces,
-                                             obj);
-
-        Class<?>[] ctorParms = {
-            ScriptRuntime.ContextFactoryClass,
-            ScriptRuntime.ScriptableClass
-        };
-        Object[] ctorArgs = { cx.getFactory(), obj };
+        Class<?> adapterClass = getAdapterClass(scope, superClass, interfaces, obj);
+        Object adapter;
+        
+        int argsCount = N - classCount - 1;
         try {
-            Object adapter = adapterClass.getConstructor(ctorParms).
-                                 newInstance(ctorArgs);
+            if (argsCount > 0) {
+                // Arguments contain parameters for super-class constructor.
+                // We use the generic Java method lookup logic to find and
+                // invoke the right constructor.
+                Object[] ctorArgs = new Object[argsCount + 2];
+                ctorArgs[0] = obj;
+                ctorArgs[1] = cx.getFactory();
+                System.arraycopy(args, classCount + 1, ctorArgs, 2, argsCount);
+                // TODO: cache class wrapper?
+                NativeJavaClass classWrapper = new NativeJavaClass(scope, adapterClass);
+                NativeJavaMethod ctors = classWrapper.members.ctors;
+                int index = ctors.findCachedFunction(cx, ctorArgs);
+                if (index < 0) {
+                    String sig = NativeJavaMethod.scriptSignature(args);
+                    throw Context.reportRuntimeError2(
+                            "msg.no.java.ctor", adapterClass.getName(), sig);
+                }
+
+                // Found the constructor, so try invoking it.
+                adapter = NativeJavaClass.constructInternal(ctorArgs, ctors.methods[index]);
+            } else {
+                Class<?>[] ctorParms = {
+                        ScriptRuntime.ScriptableClass,
+                        ScriptRuntime.ContextFactoryClass
+                };
+                Object[] ctorArgs = { obj, cx.getFactory() };
+                adapter = adapterClass.getConstructor(ctorParms).newInstance(ctorArgs);
+            }
+
             Object self = getAdapterSelf(adapterClass, adapter);
             // Return unwrapped JavaAdapter if it implements Scriptable
             if (self instanceof Wrapper) {
@@ -313,7 +353,7 @@ public final class JavaAdapter implements IdFunctionCall
     }
 
     private static Class<?> getAdapterClass(Scriptable scope, Class<?> superClass,
-                                         Class<?>[] interfaces, Scriptable obj)
+                                            Class<?>[] interfaces, Scriptable obj)
     {
         ClassCache cache = ClassCache.get(scope);
         Map<JavaAdapterSignature,Class<?>> generated
@@ -324,8 +364,7 @@ public final class JavaAdapter implements IdFunctionCall
         sig = new JavaAdapterSignature(superClass, interfaces, names);
         Class<?> adapterClass = generated.get(sig);
         if (adapterClass == null) {
-            String adapterName = "adapter"
-                                 + cache.newClassSerialNumber();
+            String adapterName = "adapter" + cache.newClassSerialNumber();
             byte[] code = createAdapterCode(names, adapterName,
                                             superClass, interfaces, null);
 
@@ -346,13 +385,13 @@ public final class JavaAdapter implements IdFunctionCall
         ClassFileWriter cfw = new ClassFileWriter(adapterName,
                                                   superClass.getName(),
                                                   "<adapter>");
-        cfw.addField("factory", "L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;",
+        cfw.addField("factory", "Lorg/mozilla/javascript/ContextFactory;",
                      (short) (ClassFileWriter.ACC_PUBLIC |
                               ClassFileWriter.ACC_FINAL));
-        cfw.addField("delegee", "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;",
+        cfw.addField("delegee", "Lorg/mozilla/javascript/Scriptable;",
                      (short) (ClassFileWriter.ACC_PUBLIC |
                               ClassFileWriter.ACC_FINAL));
-        cfw.addField("self", "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;",
+        cfw.addField("self", "Lorg/mozilla/javascript/Scriptable;",
                      (short) (ClassFileWriter.ACC_PUBLIC |
                               ClassFileWriter.ACC_FINAL));
         int interfacesCount = interfaces == null ? 0 : interfaces.length;
@@ -362,10 +401,14 @@ public final class JavaAdapter implements IdFunctionCall
         }
 
         String superName = superClass.getName().replace('.', '/');
-        generateCtor(cfw, adapterName, superName);
+        Constructor<?>[] ctors = superClass.getConstructors();
+        for (Constructor<?> ctor : ctors) {
+            generateCtor(cfw, adapterName, superName, ctor);
+        }
         generateSerialCtor(cfw, adapterName, superName);
-        if (scriptClassName != null)
+        if (scriptClassName != null) {
             generateEmptyCtor(cfw, adapterName, superName, scriptClassName);
+        }
 
         ObjToIntMap generatedOverrides = new ObjToIntMap();
         ObjToIntMap generatedMethods = new ObjToIntMap();
@@ -612,44 +655,71 @@ public final class JavaAdapter implements IdFunctionCall
     }
 
     private static void generateCtor(ClassFileWriter cfw, String adapterName,
-                                     String superName)
+                                     String superName, Constructor<?> superCtor)
     {
-        cfw.startMethod("<init>",
-                        "(L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;"
-                        +"L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;)V",
+        short locals = 3; // this + factory + delegee
+        Class<?>[] parameters = superCtor.getParameterTypes();
+
+        // Note that we swapped arguments in app-facing constructors to avoid
+        // conflicting signatures with serial constructor defined below.
+        if (parameters.length == 0) {
+            cfw.startMethod("<init>",
+                        "(Lorg/mozilla/javascript/Scriptable;"
+                        +"Lorg/mozilla/javascript/ContextFactory;)V",
                         ClassFileWriter.ACC_PUBLIC);
 
-        // Invoke base class constructor
-        cfw.add(ByteCode.ALOAD_0);  // this
-        cfw.addInvoke(ByteCode.INVOKESPECIAL, superName, "<init>", "()V");
+            // Invoke base class constructor
+            cfw.add(ByteCode.ALOAD_0);  // this
+            cfw.addInvoke(ByteCode.INVOKESPECIAL, superName, "<init>", "()V");
+        } else {
+            StringBuilder sig = new StringBuilder(
+                    "(Lorg/mozilla/javascript/Scriptable;"
+                    +"Lorg/mozilla/javascript/ContextFactory;");
+            int marker = sig.length(); // lets us reuse buffer for super signature
+            for (Class<?> c : parameters) {
+                appendTypeString(sig, c);
+            }
+            sig.append(")V");
+            cfw.startMethod("<init>", sig.toString(), ClassFileWriter.ACC_PUBLIC);
 
-        // Save parameter in instance variable "factory"
-        cfw.add(ByteCode.ALOAD_0);  // this
-        cfw.add(ByteCode.ALOAD_1);  // first arg: ContextFactory instance
-        cfw.add(ByteCode.PUTFIELD, adapterName, "factory",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;");
+            // Invoke base class constructor
+            cfw.add(ByteCode.ALOAD_0);  // this
+            short paramOffset = 3;
+            for (Class<?> parameter : parameters) {
+                paramOffset += generatePushParam(cfw, paramOffset, parameter);
+            }
+            locals = paramOffset;
+            sig.delete(1, marker);
+            cfw.addInvoke(ByteCode.INVOKESPECIAL, superName, "<init>", sig.toString());
+        }
 
         // Save parameter in instance variable "delegee"
         cfw.add(ByteCode.ALOAD_0);  // this
-        cfw.add(ByteCode.ALOAD_2);  // second arg: Scriptable delegee
+        cfw.add(ByteCode.ALOAD_1);  // first arg: Scriptable delegee
         cfw.add(ByteCode.PUTFIELD, adapterName, "delegee",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
+
+        // Save parameter in instance variable "factory"
+        cfw.add(ByteCode.ALOAD_0);  // this
+        cfw.add(ByteCode.ALOAD_2);  // second arg: ContextFactory instance
+        cfw.add(ByteCode.PUTFIELD, adapterName, "factory",
+                "Lorg/mozilla/javascript/ContextFactory;");
 
         cfw.add(ByteCode.ALOAD_0);  // this for the following PUTFIELD for self
         // create a wrapper object to be used as "this" in method calls
-        cfw.add(ByteCode.ALOAD_2);  // the Scriptable delegee
+        cfw.add(ByteCode.ALOAD_1);  // the Scriptable delegee
         cfw.add(ByteCode.ALOAD_0);  // this
         cfw.addInvoke(ByteCode.INVOKESTATIC,
-                      JarJarHelper.javascriptPrefixSlashes + "/JavaAdapter",
+                      "org/mozilla/javascript/JavaAdapter",
                       "createAdapterWrapper",
-                      "(L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;"
+                      "(Lorg/mozilla/javascript/Scriptable;"
                       +"Ljava/lang/Object;"
-                      +")L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                      +")Lorg/mozilla/javascript/Scriptable;");
         cfw.add(ByteCode.PUTFIELD, adapterName, "self",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
 
         cfw.add(ByteCode.RETURN);
-        cfw.stopMethod((short)3); // 3: this + factory + delegee
+        cfw.stopMethod(locals);
     }
 
     private static void generateSerialCtor(ClassFileWriter cfw,
@@ -657,9 +727,9 @@ public final class JavaAdapter implements IdFunctionCall
                                            String superName)
     {
         cfw.startMethod("<init>",
-                        "(L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;"
-                        +"L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;"
-                        +"L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;"
+                        "(Lorg/mozilla/javascript/ContextFactory;"
+                        +"Lorg/mozilla/javascript/Scriptable;"
+                        +"Lorg/mozilla/javascript/Scriptable;"
                         +")V",
                         ClassFileWriter.ACC_PUBLIC);
 
@@ -671,18 +741,18 @@ public final class JavaAdapter implements IdFunctionCall
         cfw.add(ByteCode.ALOAD_0);  // this
         cfw.add(ByteCode.ALOAD_1);  // first arg: ContextFactory instance
         cfw.add(ByteCode.PUTFIELD, adapterName, "factory",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;");
+                "Lorg/mozilla/javascript/ContextFactory;");
 
         // Save parameter in instance variable "delegee"
         cfw.add(ByteCode.ALOAD_0);  // this
         cfw.add(ByteCode.ALOAD_2);  // second arg: Scriptable delegee
         cfw.add(ByteCode.PUTFIELD, adapterName, "delegee",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
         // save self
         cfw.add(ByteCode.ALOAD_0);  // this
-        cfw.add(ByteCode.ALOAD_3);  // second arg: Scriptable self
+        cfw.add(ByteCode.ALOAD_3);  // third arg: Scriptable self
         cfw.add(ByteCode.PUTFIELD, adapterName, "self",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
 
         cfw.add(ByteCode.RETURN);
         cfw.stopMethod((short)4); // 4: this + factory + delegee + self
@@ -703,7 +773,7 @@ public final class JavaAdapter implements IdFunctionCall
         cfw.add(ByteCode.ALOAD_0);
         cfw.add(ByteCode.ACONST_NULL);
         cfw.add(ByteCode.PUTFIELD, adapterName, "factory",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;");
+                "Lorg/mozilla/javascript/ContextFactory;");
 
         // Load script class
         cfw.add(ByteCode.NEW, scriptClassName);
@@ -712,30 +782,30 @@ public final class JavaAdapter implements IdFunctionCall
 
         // Run script and save resulting scope
         cfw.addInvoke(ByteCode.INVOKESTATIC,
-                      JarJarHelper.javascriptPrefixSlashes + "/JavaAdapter",
+                      "org/mozilla/javascript/JavaAdapter",
                       "runScript",
-                      "(L" + JarJarHelper.javascriptPrefixSlashes + "/Script;"
-                      +")L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                      "(Lorg/mozilla/javascript/Script;"
+                      +")Lorg/mozilla/javascript/Scriptable;");
         cfw.add(ByteCode.ASTORE_1);
 
         // Save the Scriptable in instance variable "delegee"
         cfw.add(ByteCode.ALOAD_0);  // this
         cfw.add(ByteCode.ALOAD_1);  // the Scriptable
         cfw.add(ByteCode.PUTFIELD, adapterName, "delegee",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
 
         cfw.add(ByteCode.ALOAD_0);  // this for the following PUTFIELD for self
         // create a wrapper object to be used as "this" in method calls
         cfw.add(ByteCode.ALOAD_1);  // the Scriptable
         cfw.add(ByteCode.ALOAD_0);  // this
         cfw.addInvoke(ByteCode.INVOKESTATIC,
-                      JarJarHelper.javascriptPrefixSlashes + "/JavaAdapter",
+                      "org/mozilla/javascript/JavaAdapter",
                       "createAdapterWrapper",
-                      "(L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;"
+                      "(Lorg/mozilla/javascript/Scriptable;"
                       +"Ljava/lang/Object;"
-                      +")L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                      +")Lorg/mozilla/javascript/Scriptable;");
         cfw.add(ByteCode.PUTFIELD, adapterName, "self",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
 
         cfw.add(ByteCode.RETURN);
         cfw.stopMethod((short)2); // this + delegee
@@ -839,7 +909,7 @@ public final class JavaAdapter implements IdFunctionCall
 
         } else if (retType == Boolean.TYPE) {
             cfw.addInvoke(ByteCode.INVOKESTATIC,
-                          JarJarHelper.javascriptPrefixSlashes + "/Context",
+                          "org/mozilla/javascript/Context",
                           "toBoolean", "(Ljava/lang/Object;)Z");
             cfw.add(ByteCode.IRETURN);
 
@@ -848,7 +918,7 @@ public final class JavaAdapter implements IdFunctionCall
             // return the first character.
             // first convert the value to a string if possible.
             cfw.addInvoke(ByteCode.INVOKESTATIC,
-                          JarJarHelper.javascriptPrefixSlashes + "/Context",
+                          "org/mozilla/javascript/Context",
                           "toString",
                           "(Ljava/lang/Object;)Ljava/lang/String;");
             cfw.add(ByteCode.ICONST_0);
@@ -858,7 +928,7 @@ public final class JavaAdapter implements IdFunctionCall
 
         } else if (retType.isPrimitive()) {
             cfw.addInvoke(ByteCode.INVOKESTATIC,
-                          JarJarHelper.javascriptPrefixSlashes + "/Context",
+                          "org/mozilla/javascript/Context",
                           "toNumber", "(Ljava/lang/Object;)D");
             String typeName = retType.getName();
             switch (typeName.charAt(0)) {
@@ -894,7 +964,7 @@ public final class JavaAdapter implements IdFunctionCall
                               "(Ljava/lang/String;)Ljava/lang/Class;");
 
                 cfw.addInvoke(ByteCode.INVOKESTATIC,
-                              JarJarHelper.javascriptPrefixSlashes + "/JavaAdapter",
+                              "org/mozilla/javascript/JavaAdapter",
                               "convertResult",
                               "(Ljava/lang/Object;"
                               +"Ljava/lang/Class;"
@@ -910,7 +980,7 @@ public final class JavaAdapter implements IdFunctionCall
                                        String methodName, Class<?>[] parms,
                                        Class<?> returnType)
     {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         int paramsEnd = appendMethodSignature(parms, returnType, sb);
         String methodSignature = sb.toString();
         cfw.startMethod(methodName, methodSignature,
@@ -921,24 +991,24 @@ public final class JavaAdapter implements IdFunctionCall
         // push factory
         cfw.add(ByteCode.ALOAD_0);
         cfw.add(ByteCode.GETFIELD, genName, "factory",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;");
+                "Lorg/mozilla/javascript/ContextFactory;");
 
         // push self
         cfw.add(ByteCode.ALOAD_0);
         cfw.add(ByteCode.GETFIELD, genName, "self",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
 
         // push function
         cfw.add(ByteCode.ALOAD_0);
         cfw.add(ByteCode.GETFIELD, genName, "delegee",
-                "L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;");
+                "Lorg/mozilla/javascript/Scriptable;");
         cfw.addPush(methodName);
         cfw.addInvoke(ByteCode.INVOKESTATIC,
-                      JarJarHelper.javascriptPrefixSlashes + "/JavaAdapter",
+                      "org/mozilla/javascript/JavaAdapter",
                       "getFunction",
-                      "(L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;"
+                      "(Lorg/mozilla/javascript/Scriptable;"
                       +"Ljava/lang/String;"
-                      +")L" + JarJarHelper.javascriptPrefixSlashes + "/Function;");
+                      +")Lorg/mozilla/javascript/Function;");
 
         // push arguments
         generatePushWrappedArgs(cfw, parms, parms.length);
@@ -962,11 +1032,11 @@ public final class JavaAdapter implements IdFunctionCall
         // go through utility method, which creates a Context to run the
         // method in.
         cfw.addInvoke(ByteCode.INVOKESTATIC,
-                      JarJarHelper.javascriptPrefixSlashes + "/JavaAdapter",
+                      "org/mozilla/javascript/JavaAdapter",
                       "callMethod",
-                      "(L" + JarJarHelper.javascriptPrefixSlashes + "/ContextFactory;"
-                      +"L" + JarJarHelper.javascriptPrefixSlashes + "/Scriptable;"
-                      +"L" + JarJarHelper.javascriptPrefixSlashes + "/Function;"
+                      "(Lorg/mozilla/javascript/ContextFactory;"
+                      +"Lorg/mozilla/javascript/Scriptable;"
+                      +"Lorg/mozilla/javascript/Function;"
                       +"[Ljava/lang/Object;"
                       +"J"
                       +")Ljava/lang/Object;");
@@ -1063,8 +1133,8 @@ public final class JavaAdapter implements IdFunctionCall
 
         // push the rest of the parameters.
         int paramOffset = 1;
-        for (int i = 0; i < parms.length; i++) {
-            paramOffset += generatePushParam(cfw, paramOffset, parms[i]);
+        for (Class<?> parm : parms) {
+            paramOffset += generatePushParam(cfw, paramOffset, parm);
         }
 
         // call the superclass implementation of the method.
@@ -1088,22 +1158,21 @@ public final class JavaAdapter implements IdFunctionCall
      */
     private static String getMethodSignature(Method method, Class<?>[] argTypes)
     {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         appendMethodSignature(argTypes, method.getReturnType(), sb);
         return sb.toString();
     }
 
     static int appendMethodSignature(Class<?>[] argTypes,
                                      Class<?> returnType,
-                                     StringBuffer sb)
+                                     StringBuilder sb)
     {
         sb.append('(');
         int firstLocal = 1 + argTypes.length; // includes this.
-        for (int i = 0; i < argTypes.length; i++) {
-            Class<?> type = argTypes[i];
+        for (Class<?> type : argTypes) {
             appendTypeString(sb, type);
             if (type == Long.TYPE || type == Double.TYPE) {
-                // adjust for duble slot
+                // adjust for double slot
                 ++firstLocal;
             }
         }
@@ -1112,7 +1181,7 @@ public final class JavaAdapter implements IdFunctionCall
         return firstLocal;
     }
 
-    private static StringBuffer appendTypeString(StringBuffer sb, Class<?> type)
+    private static StringBuilder appendTypeString(StringBuilder sb, Class<?> type)
     {
         while (type.isArray()) {
             sb.append('[');
