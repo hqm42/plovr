@@ -30,6 +30,7 @@ public enum Handler {
   SOURCEMAP("/sourcemap", SourceMapHandler.class),
   TEST("/test", TestHandler.class),
   VIEW("/view", ViewFileHandler.class),
+  ERRORS("/errors", ErrorsRequestHandler.class),
   ;
 
   private final String context;
