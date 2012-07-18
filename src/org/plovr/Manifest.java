@@ -271,7 +271,13 @@ public final class Manifest {
       // getAllDependencies() so that it gets initialized.
       getAllDependencies(true /* cacheDependencies */);
     }
-    return dependencyCache.get(name);
+    JsInput jsInput = dependencyCache.get(name);
+    int i =0;
+    while (jsInput==null && i++ <5){
+    	name = "../"+name;
+    	jsInput = dependencyCache.get(name);
+    }
+	return jsInput;
   }
 
   void buildDependencies(Map<String, JsInput> provideToSource,
