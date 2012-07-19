@@ -139,7 +139,7 @@ public final class Compilation {
     } else {
       this.result = compiler.compileModules(externs, modules, options);
     }
-
+    
     if (config.getTreatWarningsAsErrors() && result.warnings.length > 0) {
       // Combine the errors and warnings into a single array.
       Result originalResult = this.result;

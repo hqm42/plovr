@@ -820,6 +820,8 @@ public final class Config implements Comparable<Config> {
 
     private String pathToClosureLibrary = null;
 
+    private String soyExportPath = null;
+
     private boolean excludeClosureLibrary = false;
 
     private final List<ConfigPath> paths = Lists.newArrayList();
@@ -1057,6 +1059,10 @@ public final class Config implements Comparable<Config> {
       this.pathToClosureLibrary = pathToClosureLibrary;
     }
 
+    public void setSoyExportPath(String soyExportPath) {
+        this.soyExportPath = soyExportPath;
+   }
+    
     public void setExcludeClosureLibrary(boolean excludeClosureLibrary) {
       this.excludeClosureLibrary = excludeClosureLibrary;
     }
@@ -1370,7 +1376,7 @@ public final class Config implements Comparable<Config> {
         }
 
         SoyFileOptions soyFileOptions = new SoyFileOptions(soyFunctionNames,
-            !this.excludeClosureLibrary);
+            !this.excludeClosureLibrary, this.soyExportPath);
 
         manifest = new Manifest(
             excludeClosureLibrary,

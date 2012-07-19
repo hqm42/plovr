@@ -36,11 +36,14 @@ public class SoyFile extends LocalFileJsInput {
   private final Injector injector;
 
   private final SoyJsSrcOptions jsSrcOptions;
+  
+  private final SoyFileOptions soyFileOptions;
 
   SoyFile(String name, File source, SoyFileOptions soyFileOptions) {
     super(name, source);
     this.injector = createInjector(soyFileOptions.pluginModuleNames);
     this.jsSrcOptions = get(soyFileOptions);
+    this.soyFileOptions=soyFileOptions;
   }
 
   private static SoyJsSrcOptions get(SoyFileOptions options) {
@@ -63,14 +66,27 @@ public class SoyFile extends LocalFileJsInput {
 
   @Override
   public String getCode() {
+	File source = getSource();
+	
+	File out = soyFileOptions.exportPath != null ? new File(new File(
+			soyFileOptions.exportPath), source.getName().replace(".soy",
+			".js")) : null;
+  
     SoyFileSet.Builder builder = injector.getInstance(SoyFileSet.Builder.class);
-    builder.add(getSource());
+	builder.add(source);
     builder.setCssHandlingScheme(CssHandlingScheme.BACKEND_SPECIFIC);
     SoyFileSet fileSet = builder.build();
     final SoyMsgBundle msgBundle = null;
     try {
       String code = fileSet.compileToJsSrc(jsSrcOptions, msgBundle).get(0);
       logger.fine(code);
+	  if (out != null) {
+		try {
+			Files.write(code, out);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	  }
       return code;
     } catch (SoySyntaxException e) {
       throw new PlovrSoySyntaxException(e, this);

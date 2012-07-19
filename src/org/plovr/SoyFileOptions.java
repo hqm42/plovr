@@ -16,16 +16,18 @@ final class SoyFileOptions {
 
   final List<String> pluginModuleNames;
   final boolean useClosureLibrary;
+  final String exportPath;
 
   public SoyFileOptions() {
-    this(ImmutableList.<String>of(), true);
+    this(ImmutableList.<String>of(), true,null);
   }
 
   public SoyFileOptions(List<String> pluginModuleNames,
-      boolean useClosureLibrary) {
+      boolean useClosureLibrary, String exportPath) {
     Preconditions.checkNotNull(pluginModuleNames);
     this.pluginModuleNames = ImmutableList.copyOf(pluginModuleNames);
     this.useClosureLibrary = useClosureLibrary;
+    this.exportPath=exportPath;
   }
 
   @Override

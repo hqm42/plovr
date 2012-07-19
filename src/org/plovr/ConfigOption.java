@@ -125,6 +125,14 @@ public enum ConfigOption {
     }
   }),
 
+  SOY_EXPORT_PATH("soy-generate-js-path", new ConfigUpdater() {
+	    @Override
+	    public void apply(String path, Config.Builder builder) {
+	      String resolvedPath = maybeResolvePath(path, builder);
+	      builder.setSoyExportPath(resolvedPath);
+	    }
+	  }),
+  
   EXCLUDE_CLOSURE_LIBRARY("experimental-exclude-closure-library", new ConfigUpdater() {
     @Override
     public void apply(boolean excludeClosureLibrary, Config.Builder builder) {
