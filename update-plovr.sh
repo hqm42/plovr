@@ -4,14 +4,29 @@ echo updating all dependend repositories
 cd ../plovr-main
 git-hg pull
 
+rm ../plovr/changes.txt
+
+
 cd ../closure-compiler
 git svn fetch
+echo "Closure Compiler" >> ../plovr/changes.txt
+echo "-----------------------------------------------------------------------------" >> ../plovr/changes.txt
+git log master..git-svn >> ../plovr/changes.txt
+git rebase git-svn
 
+echo "Closure Templates" >> ../plovr/changes.txt
+echo "-----------------------------------------------------------------------------" >> ../plovr/changes.txt
 cd ../closure-templates
 git svn fetch
+git log master..git-svn >> ../plovr/changes.txt
+git rebase git-svn
 
+echo "Closure Library" >> ../plovr/changes.txt
+echo "-----------------------------------------------------------------------------" >> ../plovr/changes.txt
 cd ../closure-library
 git svn fetch
+git log master..git-svn >> ../plovr/changes.txt
+git rebase git-svn
 
 echo Merging plovr upstream changes
 cd ../plovr
