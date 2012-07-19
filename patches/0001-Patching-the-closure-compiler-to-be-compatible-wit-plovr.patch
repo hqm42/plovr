@@ -1,0 +1,25 @@
+From 5ec5c0323ae7fbed147e70474beeceafbaecfba2 Mon Sep 17 00:00:00 2001
+From: Marco Hennings <marco.hennings@freiheit.com>
+Date: Mon, 16 Jul 2012 20:09:25 +0200
+Subject: [PATCH] Patching the closure compiler to be compatible wit plovr and
+ vice versa
+
+Change-Id: I9b6a4b583a3323947732309e65a828eb872b88c9
+---
+ .../src/com/google/javascript/jscomp/Result.java   |    2 +-
+ src/org/plovr/CompilationError.java                |    7 ++++---
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/closure/closure-compiler/src/com/google/javascript/jscomp/Result.java b/closure/closure-compiler/src/com/google/javascript/jscomp/Result.java
+index a191320..3f03fd0 100644
+--- a/closure/closure-compiler/src/com/google/javascript/jscomp/Result.java
++++ b/closure/closure-compiler/src/com/google/javascript/jscomp/Result.java
+@@ -36,7 +36,7 @@ public class Result {
+   public final String externExport;
+   public final String idGeneratorMap;
+ 
+-  Result(JSError[] errors, JSError[] warnings, String debugLog,
++  public Result(JSError[] errors, JSError[] warnings, String debugLog,
+          VariableMap variableMap, VariableMap propertyMap,
+          VariableMap namedAnonFunctionMap,
+          VariableMap stringMap,
