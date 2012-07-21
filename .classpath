@@ -24,5 +24,6 @@
 	<classpathentry kind="lib" path="closure/closure-templates/java/lib/icu4j-4_8_1_1.jar"/>
 	<classpathentry kind="lib" path="lib/closure-stylesheets.jar"/>
 	<classpathentry kind="lib" path="lib/selenium-java-2.21.0.jar"/>
+	<classpathentry kind="lib" path="lib/jnotify-0.94.jar" sourcepath="tmp/jnotify-0.94-src.zip"/>
 	<classpathentry kind="output" path="build/classes"/>
 </classpath>

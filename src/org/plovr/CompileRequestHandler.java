@@ -73,7 +73,8 @@ public class CompileRequestHandler extends AbstractGetHandler {
             server, config, manifest, exchange);
         builder.append(js);
       } else {
-        compile(config, exchange, builder);
+       
+        compile(config, exchange, data, builder);
       }
     } catch (CompilationException e) {
       Preconditions.checkState(builder.length() == 0,
@@ -98,6 +99,7 @@ public class CompileRequestHandler extends AbstractGetHandler {
   public static Compilation compile(Config config)
       throws CompilationException {
     try {
+	 	
       Compilation compilation = config.getManifest().getCompilerArguments(
           config.getModuleConfig());
       compilation.compile(config);
@@ -115,29 +117,33 @@ public class CompileRequestHandler extends AbstractGetHandler {
    * For modes other than RAW, compile the code and write the result to builder.
    * When modules are used, only the code for the initial module will be written,
    * along with the requisite bootstrapping code for the remaining modules.
+ * @param data 
    */
   private void compile(Config config,
-      HttpExchange exchange,
-      Appendable appendable) throws IOException, CompilationException {
-    Compilation compilation;
-    String viewSourceUrl = getViewSourceUrlForExchange(exchange);
-    try {
-      compilation = compile(config);
-    } catch (CompilationException e) {
-      writeErrors(
-          config,
-          ImmutableList.of(e.createCompilationError()),
-          viewSourceUrl,
-          appendable);
-      return;
-    }
+      HttpExchange exchange, QueryData data,
+			Appendable appendable) throws IOException, CompilationException {
 
-    server.recordCompilation(config, compilation);
+	Compilation compilation = getCompilation(exchange, data, config);
+
+	String viewSourceUrl = getViewSourceUrlForExchange(exchange);
+	if (compilation == null || compilation.isOutOfDate()) {
+
+		try {
+			compilation = compile(config);
+		} catch (CompilationException e) {
+			writeErrors(config,
+					ImmutableList.of(e.createCompilationError()),
+					viewSourceUrl, appendable);
+			return;
+		}
+		server.recordCompilation(config, compilation);
+	}
+
     Result result = compilation.getResult();
 
     if (result.success) {
       if (config.getCompilationMode() == CompilationMode.WHITESPACE) {
-        appendable.append("CLOSURE_NO_DEPS = true;\n");
+        appendable.append("CLOSURE_NO_DEPS = true;");
       }
 
       if (compilation.usesModules()) {

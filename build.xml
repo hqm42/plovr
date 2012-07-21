@@ -177,6 +177,12 @@
         <include name="**/*.soy" />
       </fileset>
     </copy>
+    <copy todir="${classes.dir}">
+      <fileset dir="${lib.dir}">
+        <include name="**/*.so" />
+        <include name="**/*.dll" />
+      </fileset>
+    </copy>
 
     <!-- Copy resources needed for org.plovr.docgen package. -->
     <copy todir="${classes.dir}/org/plovr/docgen">
