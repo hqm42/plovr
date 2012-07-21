@@ -142,9 +142,6 @@ public class CompileRequestHandler extends AbstractGetHandler {
     Result result = compilation.getResult();
 
     if (result.success) {
-      if (config.getCompilationMode() == CompilationMode.WHITESPACE) {
-        appendable.append("CLOSURE_NO_DEPS = true;");
-      }
 
       if (compilation.usesModules()) {
         final boolean isDebugMode = true;
