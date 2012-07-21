@@ -22,7 +22,7 @@ public class SoyFileOptionsTest {
   @Test
   public void testConstructor() {
     List<String> pluginModuleNames = ImmutableList.of("one", "two");
-    SoyFileOptions options = new SoyFileOptions(pluginModuleNames, false);
+    SoyFileOptions options = new SoyFileOptions(pluginModuleNames, false, null);
     assertFalse(options.useClosureLibrary);
     assertEquals(ImmutableList.of("one", "two"), options.pluginModuleNames);
   }
@@ -35,11 +35,11 @@ public class SoyFileOptionsTest {
     assertEquals(defaultOptions.hashCode(), defaultOptions2.hashCode());
 
     List<String> pluginModuleNames = ImmutableList.of("one", "two");
-    SoyFileOptions options = new SoyFileOptions(pluginModuleNames, false);
+    SoyFileOptions options = new SoyFileOptions(pluginModuleNames, false, null);
     assertFalse(defaultOptions.equals(options));
     assertTrue(defaultOptions.hashCode() != options.hashCode());
 
-    SoyFileOptions options2 = new SoyFileOptions(pluginModuleNames, false);
+    SoyFileOptions options2 = new SoyFileOptions(pluginModuleNames, false, null);
     assertTrue(options.equals(options2));
     assertEquals(options.hashCode(), options2.hashCode());
   }
