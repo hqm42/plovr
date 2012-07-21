@@ -2,6 +2,7 @@ package org.plovr;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.io.Writer;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +50,7 @@ public final class Compilation {
 	private Config config;
 	private Compiler compiler;
 	private Result result;
+	private String resultHash;
 
 	private long compileStartTimestamp;
 	private long sourceChangeTimestamp;
@@ -184,6 +186,27 @@ public final class Compilation {
 
 	public Result getResult() {
 		return this.result;
+	}
+	
+	public String getSourceMapString(){
+		Preconditions.checkState(hasResult(), "Code has not been compiled yet");
+		try {
+			StringWriter sw = new StringWriter();
+			result.sourceMap.appendTo(sw, config.getId());
+			return sw.toString();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return "";
+		
+	}
+	
+	public String getHash(){
+		if (resultHash==null){
+			// as the has indicates reloading of the sourcmaps all components are relevant for reloading
+			resultHash = Md5Util.hashJs(getCompiledCode()+getSourceMapString());
+		}
+		return resultHash;
 	}
 
 	public String getCompiledCode() {

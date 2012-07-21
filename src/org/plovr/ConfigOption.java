@@ -763,6 +763,15 @@ public enum ConfigOption {
       builder.setCssOutputFile(outputFile);
     }
   }),
+  
+  SOURCE_MAP_DYNAMIC_OUTPUT_FILE("source-map-dynamic-output-file", new ConfigUpdater() {
+	    @Override
+	    public void apply(String outputFilePath, Config.Builder builder) {
+	      File outputFile = (outputFilePath == null) ? null :
+	          new File(maybeResolvePath(outputFilePath, builder));
+	      builder.setSourceMapDynamicOutputFile(outputFile);
+	    }
+	  }),
   ;
 
   private static class ConfigUpdater {

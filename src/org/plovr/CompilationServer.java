@@ -1,6 +1,8 @@
 package org.plovr;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.List;
@@ -8,10 +10,15 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 
 import org.plovr.cli.HttpServerUtil;
+import org.plovr.io.Files;
+import org.plovr.io.Streams;
 
 import com.google.common.base.Preconditions;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
+import com.google.common.io.Closeables;
 import com.google.javascript.jscomp.SourceMap;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -36,12 +43,16 @@ public final class CompilationServer implements Runnable {
    * Maps a config id to the last Compilation performed for that config.
    */
   private final ConcurrentMap<String, Compilation> compilations;
-
+  
+  private final Cache<String, SourceMap> lastSourcemaps;
+  
   public CompilationServer(String listenAddress, int port) {
     this.listenAddress = listenAddress;
     this.port = port;
     this.configs = Maps.newConcurrentMap();
     this.compilations = Maps.newConcurrentMap();
+    
+    this.lastSourcemaps =  CacheBuilder.newBuilder().maximumSize(5).build();
   }
 
   public void registerConfig(Config config) {
@@ -142,13 +153,32 @@ public final class CompilationServer implements Runnable {
   /** Records the last compilation for the config. */
   public void recordCompilation(Config config, Compilation compilation) {
     compilations.put(config.getId(), compilation);
+    lastSourcemaps.put(compilation.getHash(), compilation.getResult().sourceMap);
+	if (config.getSourceMapDynamicOutputFile() != null) {
+		try {
+			System.out.println("Writing source map file to "+config.getSourceMapDynamicOutputFile().getAbsolutePath());
+			Writer writer = Streams.createFileWriter(
+					config.getSourceMapDynamicOutputFile(), config);
+			compilation.getResult().sourceMap.appendTo(writer,
+					config.getId());
+			Closeables.closeQuietly(writer);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
   }
 
   /** @return the last recorded compilation for the specified config */
   public Compilation getLastCompilation(Config config) {
     return compilations.get(config.getId());
   }
-
+  
+  public SourceMap getSourceMapForHash(String hash) {
+		SourceMap sourcemap = this.lastSourcemaps.getIfPresent(hash);
+		System.out.println("Delivering sourcemap by hash " +hash +" found="+(sourcemap!=null));
+		return sourcemap;
+  }
+  
   public SourceMap getSourceMapFor(Config config) {
     Compilation compilation = getLastCompilation(config);
     return compilation.getResult().sourceMap;

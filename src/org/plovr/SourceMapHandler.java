@@ -16,7 +16,10 @@ final class SourceMapHandler extends AbstractGetHandler {
 
   @Override
   protected void doGet(HttpExchange exchange, QueryData data, Config config) throws IOException {
-    SourceMap sourceMap = server.getSourceMapFor(config);
+    String hash = data.getParam("hash");
+	  
+    SourceMap sourceMap = hash != null ? server.getSourceMapForHash(hash)
+				: server.getSourceMapFor(config);
     if (sourceMap == null) {
       HttpUtil.writeErrorMessageResponse(exchange,
           "No source map found -- perhaps you have not compiled yet?");
@@ -34,6 +37,9 @@ final class SourceMapHandler extends AbstractGetHandler {
 
       Headers responseHeaders = exchange.getResponseHeaders();
       responseHeaders.set("Content-Type", "text/plain");
+      if (hash!=null){
+    	  responseHeaders.set("Cache-Control", "max-age=60000, public");
+      }
       exchange.sendResponseHeaders(200, builder.length());
       Writer responseBody = new OutputStreamWriter(exchange.getResponseBody());
       responseBody.write(builder.toString());

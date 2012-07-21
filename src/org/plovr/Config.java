@@ -146,6 +146,8 @@ public final class Config implements Comparable<Config> {
 
   private final File propertyMapOutputFile;
 
+  private final File sourceMapDynamicOutputFile;
+  
   private List<FileWithLastModified> configFileInheritanceChain =
       Lists.newArrayList();
 
@@ -208,7 +210,8 @@ public final class Config implements Comparable<Config> {
       List<String> allowedUnrecognizedProperties,
       List<String> allowedNonStandardCssFunctions,
       String gssFunctionMapProviderClassName,
-      File cssOutputFile) {
+      File cssOutputFile,
+      File sourceMapDynamicOutputFile) {
     Preconditions.checkNotNull(defines);
 
     this.id = id;
@@ -254,6 +257,7 @@ public final class Config implements Comparable<Config> {
         allowedNonStandardCssFunctions);
     this.gssFunctionMapProviderClassName = gssFunctionMapProviderClassName;
     this.cssOutputFile = cssOutputFile;
+    this.sourceMapDynamicOutputFile = sourceMapDynamicOutputFile;
   }
 
   public static Builder builder(File relativePathBase, File configFile,
@@ -453,7 +457,12 @@ public final class Config implements Comparable<Config> {
   public File getCssOutputFile() {
     return cssOutputFile;
   }
+ 
+  public File getSourceMapDynamicOutputFile() {
+    return sourceMapDynamicOutputFile;
+  }
 
+  
   public List<WebDriverFactory> getWebDriverFactories() {
     return ImmutableList.copyOf(testDrivers);
   }
@@ -910,6 +919,8 @@ public final class Config implements Comparable<Config> {
     private String gssFunctionMapProviderClassName;
 
     private File cssOutputFile = null;
+    
+    private File sourceMapDynamicOutputFile = null;
 
     /**
      * Pattern to validate a config id. A config id may not contain funny
@@ -988,6 +999,7 @@ public final class Config implements Comparable<Config> {
       this.gssFunctionMapProviderClassName = config.
           gssFunctionMapProviderClassName;
       this.cssOutputFile = config.cssOutputFile;
+      this.sourceMapDynamicOutputFile = config.sourceMapDynamicOutputFile;
     }
 
     /** Directory against which relative paths should be resolved. */
@@ -1348,7 +1360,9 @@ public final class Config implements Comparable<Config> {
     public void setCssOutputFile(File cssOutputFile) {
       this.cssOutputFile = cssOutputFile;
     }
-
+    public void setSourceMapDynamicOutputFile(File sourceMapDynamicOutputFile) {
+        this.sourceMapDynamicOutputFile = sourceMapDynamicOutputFile;
+    }
     public Config build() {
       File closureLibraryDirectory = pathToClosureLibrary != null
           ? new File(pathToClosureLibrary)
@@ -1432,7 +1446,8 @@ public final class Config implements Comparable<Config> {
           allowedUnrecognizedProperties,
           allowedNonStandardFunctions,
           gssFunctionMapProviderClassName,
-          cssOutputFile);
+          cssOutputFile,
+          sourceMapDynamicOutputFile);
 
       return config;
     }

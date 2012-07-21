@@ -72,9 +72,9 @@ public class CompileRequestHandler extends AbstractGetHandler {
         String js = InputFileHandler.getJsToLoadManifest(
             server, config, manifest, exchange);
         builder.append(js);
-      } else {
-       
+      } else {       
         compile(config, exchange, data, builder);
+       
       }
     } catch (CompilationException e) {
       Preconditions.checkState(builder.length() == 0,
@@ -87,13 +87,10 @@ public class CompileRequestHandler extends AbstractGetHandler {
           builder);
     }
     
+    String compiled = builder.toString();
     // Set header identifying source map unless in RAW mode
-    if (config.getCompilationMode() != CompilationMode.RAW) {
-        Headers responseHeaders = exchange.getResponseHeaders();
-        responseHeaders.set("X-SourceMap", "/sourcemap?id=" + config.getId());
-    }
 
-    Responses.writeJs(builder.toString(), config, exchange);
+	Responses.writeJs(compiled, config, exchange);
   }
 
   public static Compilation compile(Config config)
@@ -122,7 +119,8 @@ public class CompileRequestHandler extends AbstractGetHandler {
   private void compile(Config config,
       HttpExchange exchange, QueryData data,
 			Appendable appendable) throws IOException, CompilationException {
-
+	  Headers responseHeaders = exchange.getResponseHeaders();
+ 	  responseHeaders.set("Cache-Control", "max-age=0, must revalidate");
 	Compilation compilation = getCompilation(exchange, data, config);
 
 	String viewSourceUrl = getViewSourceUrlForExchange(exchange);
@@ -138,7 +136,9 @@ public class CompileRequestHandler extends AbstractGetHandler {
 		}
 		server.recordCompilation(config, compilation);
 	}
-
+	if (config.getCompilationMode() != CompilationMode.RAW) {
+         responseHeaders.set("X-SourceMap", "/sourcemap?id=" + config.getId()+"&hash="+compilation.getHash());
+    }
     Result result = compilation.getResult();
 
     if (result.success) {
